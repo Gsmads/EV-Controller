@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>EV Control Room</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+<div class="app">
+
+  <!-- Header — connection, uptime, faults -->
+  <header class="topbar" data-region="header"></header>
+
+  <!-- Main grid: left | center | right -->
+  <main class="main-grid">
+
+    <!-- Left panel: control source + inputs + lights + comm stats -->
+    <aside class="left-panel">
+
+      <section class="section">
+        <h3 class="section-title">Active Sources</h3>
+        <div data-region="source"></div>
+      </section>
+
+      <section class="section">
+        <h3 class="section-title">External Inputs <span class="upcoming">MVP-3</span></h3>
+        <div class="input-grid" data-region="inputs"></div>
+      </section>
+
+      <section class="section">
+        <h3 class="section-title">Lights <span class="upcoming">MVP-2</span></h3>
+        <div class="lights-grid" data-region="lights"></div>
+      </section>
+
+      <section class="section">
+        <h3 class="section-title">Communication</h3>
+        <div data-region="comm"></div>
+      </section>
+
+    </aside>
+
+    <!-- Center: battery + gauge -->
+    <section class="center-stage">
+      <div class="battery-column" data-region="battery"></div>
+      <div class="gauge-stage" data-region="gauge"></div>
+    </section>
+
+    <!-- Right: charts -->
+    <aside class="right-panel" data-region="charts"></aside>
+
+  </main>
+
+  <!-- Bottom bar: sliders + modes + e-stop -->
+  <footer class="bottom-bar">
+    <div class="slider-group">
+      <div data-region="pedal-gas"></div>
+      <div data-region="pedal-brake"></div>
+    </div>
+    <div class="mode-buttons" data-region="modes"></div>
+    <div class="action-buttons" data-region="estop"></div>
+  </footer>
+
+</div>
+
+<!-- Modular JS — point of extension -->
+<script type="module" src="js/app.js"></script>
+
+</body>
+</html>
