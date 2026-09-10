@@ -226,5 +226,8 @@ cd tests && make run        # 71 тест, ~5 секунд
 
 ## Лицензия и происхождение
 
+Проект распространяется под **GNU General Public License v3** — полный текст
+в [LICENSE](LICENSE), основание — [ADR-0013](docs/adr/0013-licenziya-gpl-v3.md).
+
 `firmware/MICRO_UART.*` адаптированы из [Grbl](https://github.com/gnea/grbl)
 (GPL v3) — Sungeun K. Jeon, Simen Svale Skogsrud. Остальной код оригинальный.
