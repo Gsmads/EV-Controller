@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>EV Control Room — Dashboard Mockup</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+
+<style>
+/* ============================================================
+   TOKENS
+   ============================================================ */
+:root {
+  /* Backgrounds */
+  --bg-deep:     #07090e;
+  --bg-base:     #0d1119;
+  --bg-panel:    #131826;
+  --bg-elevated: #1a2030;
+  --bg-hover:    #232a3d;
+
+  /* Borders */
+  --border-subtle:   rgba(255,255,255,0.05);
+  --border-emphasis: rgba(255,255,255,0.10);
+  --border-strong:   rgba(255,255,255,0.18);
+
+  /* Text */
+  --text-primary:   #e8eaee;
+  --text-secondary: #8d95a3;
+  --text-dim:       #5a6171;
+  --text-faint:     #3a4051;
+
+  /* Data accents */
+  --accent-current: #f5a623;  /* Amber — "current value, what IS" */
+  --accent-target:  #5dc8e3;  /* Cyan — "target value, what's REQUESTED" */
+  --accent-success: #4ade80;
+  --accent-warning: #fbbf24;
+  --accent-danger:  #ef4444;
+  --accent-uart:    #b794f6;  /* Violet — UART control */
+  --accent-gas:     #4ade80;
+  --accent-brake:   #ef4444;
+
+  /* Spacing */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+}
+
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+  min-height: 100vh;
+  overflow-x: auto;
+  min-width: 1440px;
+}
+
+.mono { font-family: 'Geist Mono', ui-monospace, monospace; }
+
+button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input[type="range"] { -webkit-appearance: none; appearance: none; }
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 900px;
+}
+
+/* HEADER */
+.topbar {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-6);
+  border-bottom: 1px solid var(--border-emphasis);
+  background: var(--bg-base);
+  gap: var(--space-8);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  color: var(--text-primary);
+}
+.brand-mark {
+  width: 22px; height: 22px;
+  border: 1.5px solid var(--accent-current);
+  position: relative;
+}
+.brand-mark::before {
+  content: ""; position: absolute;
+  inset: 3px;
+  background: var(--accent-current);
+}
+
+.tabs { display: flex; gap: var(--space-1); margin-left: var(--space-6); }
+.tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+  position: relative;
+  top: 2px;
+}
+.tab:hover { color: var(--text-primary); }
+.tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-current);
+}
+
+.status-cluster {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+.status-cluster .label { color: var(--text-dim); margin-right: 6px; }
+.status-cluster .value { color: var(--text-primary); }
+
+.status-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent-success);
+  margin-right: 6px;
+  box-shadow: 0 0 0 0 var(--accent-success);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+
+.faults-badge {
+  padding: 4px 10px;
+  border: 1px solid var(--border-emphasis);
+  color: var(--text-secondary);
+}
+.faults-badge.has-faults {
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
+}
+
+/* MAIN GRID */
+.main-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 280px 1fr 520px;
+  gap: 1px;
+  background: var(--border-emphasis);
+  overflow: hidden;
+}
+
+.main-grid > * {
+  background: var(--bg-base);
+  overflow-y: auto;
+}
+
+/* ============================================================
+   LEFT PANEL — Control & Inputs
+   ============================================================ */
+.left-panel { padding: var(--space-5); }
+
+.section { margin-bottom: var(--space-6); }
+.section-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+  margin-bottom: var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.section-title .upcoming {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0.1em;
+  background: var(--bg-elevated);
+  padding: 2px 6px;
+}
+
+/* Control source toggle */
+.source-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--bg-elevated);
+  padding: 4px;
+  gap: 2px;
+}
+.source-btn {
+  padding: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  text-align: center;
+  position: relative;
+}
+.source-btn.active {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+}
+.source-btn.uart.active { color: var(--accent-uart); }
+.source-btn.pedals.active { color: var(--accent-current); }
+.source-btn .sub {
+  display: block;
+  font-size: 9px;
+  font-weight: 500;
+  margin-top: 3px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+
+/* Input grid (external buttons/switches) */
+.input-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border-subtle);
+}
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 10px;
+  background: var(--bg-base);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.led {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+.led.on {
+  background: var(--accent-success);
+  box-shadow: 0 0 4px var(--accent-success);
+}
+.led.warn {
+  background: var(--accent-warning);
+  box-shadow: 0 0 4px var(--accent-warning);
+}
+.input-row.active { color: var(--text-primary); }
+
+/* Lights grid */
+.lights-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border-subtle);
+}
+.light-cell {
+  background: var(--bg-base);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+}
+.light-cell .icon {
+  width: 24px; height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 18px;
+}
+.light-cell .state {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.light-cell.on .icon { color: var(--accent-current); }
+.light-cell.on .state { color: var(--accent-current); }
+.light-cell.brake-on .icon { color: var(--accent-danger); }
+.light-cell.brake-on .state { color: var(--accent-danger); }
+
+/* Comm stats */
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-row .key { color: var(--text-secondary); }
+.stat-row .val {
+  font-family: 'Geist Mono', monospace;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* ============================================================
+   CENTER STAGE — Battery + Gauge
+   ============================================================ */
+.center-stage {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  align-items: center;
+  padding: var(--space-6);
+  gap: var(--space-6);
+}
+
+/* Battery */
+.battery-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  padding: var(--space-4) 0;
+  gap: var(--space-3);
+}
+.battery-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  margin-bottom: var(--space-2);
+}
+.battery-bar {
+  position: relative;
+  width: 32px;
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  overflow: hidden;
+  min-height: 200px;
+}
+.battery-fill {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  background: linear-gradient(180deg, var(--accent-success) 0%, #22c55e 100%);
+  transition: height 0.8s ease-out, background 0.4s;
+}
+.battery-fill.warn  { background: linear-gradient(180deg, var(--accent-warning), #f59e0b); }
+.battery-fill.crit  { background: linear-gradient(180deg, var(--accent-danger), #dc2626); }
+.battery-cells {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+.battery-cells > div {
+  flex: 1;
+  border-bottom: 1px solid var(--bg-deep);
+}
+.battery-cells > div:last-child { border-bottom: none; }
+.battery-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.battery-pct {
+  font-family: 'Geist Mono', monospace;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.battery-sub {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: 'Geist Mono', monospace;
+}
+.upcoming-tag {
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  padding: 2px 5px;
+  border: 1px solid var(--text-faint);
+  margin-top: 4px;
+}
+
+/* Gauge stage */
+.gauge-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+.gauge-wrapper {
+  position: relative;
+  width: 520px;
+  height: 520px;
+  max-width: 100%;
+  max-height: 100%;
+}
+.gauge-svg { width: 100%; height: 100%; display: block; }
+
+/* Track and arcs */
+.gauge-track-outer { stroke: rgba(245, 166, 35, 0.08); fill: none; stroke-width: 22; }
+.gauge-track-inner { stroke: rgba(93, 200, 227, 0.08); fill: none; stroke-width: 10; }
+.gauge-arc-current { stroke: var(--accent-current); fill: none; stroke-width: 22; stroke-linecap: round; transition: stroke-dashoffset 0.18s linear; }
+.gauge-arc-target  { stroke: var(--accent-target);  fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 0.12s linear; }
+
+.gauge-tick { stroke: var(--text-faint); stroke-width: 1; }
+.gauge-tick.major { stroke: var(--text-dim); stroke-width: 2; }
+.gauge-tick-label { fill: var(--text-secondary); font-family: 'Geist Mono', monospace; font-size: 13px; }
+
+/* Center digital display */
+.gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+  padding-top: 12px;
+}
+.gauge-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.gauge-value {
+  font-family: 'Geist Mono', monospace;
+  font-size: 96px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--text-primary);
+}
+.gauge-unit {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+}
+
+.gauge-mode {
+  margin-top: var(--space-3);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.35em;
+  color: var(--accent-current);
+  padding: 4px 12px;
+  border: 1px solid var(--accent-current);
+}
+
+.gauge-control-source {
+  margin-top: var(--space-3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+}
+.gauge-control-source .src-pedals { color: var(--accent-current); }
+.gauge-control-source .src-uart { color: var(--accent-uart); }
+
+/* Gauge legend */
+.gauge-legend {
+  display: flex;
+  gap: var(--space-5);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  margin-top: var(--space-2);
+  pointer-events: auto;
+}
+.gauge-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.gauge-legend-swatch {
+  width: 20px; height: 4px;
+}
+.gauge-legend-swatch.current { background: var(--accent-current); }
+.gauge-legend-swatch.target { background: var(--accent-target); }
+
+/* Display toggle */
+.display-toggle {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  background: var(--bg-elevated);
+  padding: 2px;
+  border: 1px solid var(--border-emphasis);
+  pointer-events: auto;
+}
+.display-toggle button {
+  padding: 6px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+}
+.display-toggle button.active {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+}
+
+/* ============================================================
+   RIGHT PANEL — Charts
+   ============================================================ */
+.right-panel {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.chart-tabs {
+  display: flex;
+  gap: 1px;
+  background: var(--border-subtle);
+  padding: 1px;
+}
+.chart-tab {
+  flex: 1;
+  padding: 8px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  text-align: center;
+  position: relative;
+}
+.chart-tab.active {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+}
+.chart-tab.active::before {
+  content: ""; position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--accent-current);
+}
+.chart-tab.upcoming {
+  color: var(--text-faint);
+}
+
+.chart-stack {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.chart-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+.chart-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--text-secondary);
+}
+.chart-legend {
+  display: flex;
+  gap: var(--space-3);
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: 'Geist Mono', monospace;
+}
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chart-legend-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+
+.chart-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 80px;
+}
+
+/* ============================================================
+   BOTTOM BAR — Sliders + Modes + E-STOP
+   ============================================================ */
+.bottom-bar {
+  height: 132px;
+  border-top: 1px solid var(--border-emphasis);
+  background: var(--bg-base);
+  padding: var(--space-4) var(--space-6);
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-6);
+  align-items: center;
+}
+
+/* Sliders */
+.slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.slider-row {
+  display: grid;
+  grid-template-columns: 50px 1fr 80px;
+  align-items: center;
+  gap: var(--space-4);
+}
+.slider-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--text-secondary);
+}
+.slider-row.gas .slider-label { color: var(--accent-gas); }
+.slider-row.brake .slider-label { color: var(--accent-brake); }
+
+.slider {
+  position: relative;
+  height: 32px;
+  display: flex;
+  align-items: center;
+}
+.slider-track {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: var(--bg-elevated);
+}
+.slider-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: var(--accent-gas);
+  transition: width 0.05s linear;
+}
+.slider-row.brake .slider-fill { background: var(--accent-brake); }
+.slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 24px;
+  background: var(--text-primary);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  border: 1px solid var(--bg-deep);
+}
+.slider input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.slider-value {
+  font-size: 16px;
+  font-weight: 500;
+  text-align: right;
+  color: var(--text-primary);
+  font-family: 'Geist Mono', monospace;
+}
+.slider-value .max { font-size: 11px; color: var(--text-dim); margin-left: 2px; }
+
+/* Mode buttons */
+.mode-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  width: 240px;
+}
+.mode-btn {
+  padding: 10px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+.mode-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.mode-btn.active {
+  background: var(--bg-deep);
+  color: var(--accent-current);
+  border-color: var(--accent-current);
+}
+
+/* Action buttons */
+.action-buttons {
+  display: flex;
+  gap: var(--space-4);
+  align-items: stretch;
+}
+.btn-release {
+  padding: 0 var(--space-5);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-emphasis);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  transition: all 0.15s;
+  height: 100%;
+}
+.btn-release:hover {
+  border-color: var(--accent-current);
+  color: var(--accent-current);
+}
+
+.btn-estop {
+  width: 200px;
+  padding: 0 var(--space-6);
+  background: var(--accent-danger);
+  color: white;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  position: relative;
+  border: 2px solid var(--accent-danger);
+  transition: all 0.1s;
+  height: 100%;
+}
+.btn-estop:hover {
+  background: #f87171;
+  border-color: #f87171;
+}
+.btn-estop:active {
+  background: #dc2626;
+  transform: scale(0.98);
+}
+.estop-glow {
+  position: absolute;
+  inset: -2px;
+  border: 2px solid var(--accent-danger);
+  opacity: 0;
+  animation: estop-pulse 2s infinite;
+}
+@keyframes estop-pulse {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(1.04); }
+}
+
+/* ============================================================
+   Scrollbars
+   ============================================================ */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--border-emphasis); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <!-- ==========================================================
+       HEADER
+       ========================================================== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      EV CONTROL ROOM
+    </div>
+
+    <nav class="tabs">
+      <button class="tab active">Dashboard</button>
+      <button class="tab">Settings &amp; Console</button>
+    </nav>
+
+    <div class="status-cluster">
+      <span><span class="status-dot"></span><span class="label">PORT</span><span class="value mono" id="port-name">/dev/ttyUSB0</span></span>
+      <span><span class="label">UPTIME</span><span class="value mono" id="uptime">00:00:00</span></span>
+      <span><span class="label">PWM</span><span class="value mono" id="pwm-freq">7812 Hz</span></span>
+      <span class="faults-badge" id="faults-badge">FAULTS · <span id="fault-count" class="mono">0</span></span>
+    </div>
+  </header>
+
+  <!-- ==========================================================
+       MAIN GRID — Left | Center | Right
+       ========================================================== -->
+  <main class="main-grid">
+
+    <!-- ===== LEFT PANEL ===== -->
+    <aside class="left-panel">
+
+      <!-- Control source -->
+      <section class="section">
+        <h3 class="section-title">Control Source</h3>
+        <div class="source-toggle">
+          <div class="source-btn pedals active" id="src-pedals">
+            PEDALS
+            <span class="sub">live</span>
+          </div>
+          <div class="source-btn uart" id="src-uart">
+            UART
+            <span class="sub">override</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- External inputs -->
+      <section class="section">
+        <h3 class="section-title">External Inputs <span class="upcoming">MVP-3</span></h3>
+        <div class="input-grid">
+          <div class="input-row active"><span class="led on"></span>Ignition</div>
+          <div class="input-row"><span class="led"></span>Neutral</div>
+          <div class="input-row active"><span class="led warn"></span>Handbrake</div>
+          <div class="input-row active"><span class="led on"></span>Eco</div>
+          <div class="input-row"><span class="led"></span>Sport</div>
+          <div class="input-row"><span class="led"></span>Reverse</div>
+          <div class="input-row"><span class="led"></span>Turn L</div>
+          <div class="input-row"><span class="led"></span>Turn R</div>
+        </div>
+      </section>
+
+      <!-- Lights -->
+      <section class="section">
+        <h3 class="section-title">Lights <span class="upcoming">MVP-2</span></h3>
+        <div class="lights-grid">
+          <div class="light-cell">
+            <div class="icon">◯</div>
+            <span>HEAD</span>
+            <span class="state">OFF</span>
+          </div>
+          <div class="light-cell">
+            <div class="icon">◯</div>
+            <span>TAIL</span>
+            <span class="state">OFF</span>
+          </div>
+          <div class="light-cell brake-on">
+            <div class="icon">◉</div>
+            <span>BRAKE</span>
+            <span class="state">ON</span>
+          </div>
+          <div class="light-cell">
+            <div class="icon">◯</div>
+            <span>REV</span>
+            <span class="state">OFF</span>
+          </div>
+          <div class="light-cell">
+            <div class="icon">◯</div>
+            <span>TURN L</span>
+            <span class="state">—</span>
+          </div>
+          <div class="light-cell">
+            <div class="icon">◯</div>
+            <span>TURN R</span>
+            <span class="state">—</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Comm stats -->
+      <section class="section">
+        <h3 class="section-title">Communication</h3>
+        <div class="stat-row"><span class="key">TX rate</span><span class="val" id="tx-rate">10 / s</span></div>
+        <div class="stat-row"><span class="key">RX rate</span><span class="val" id="rx-rate">0 / s</span></div>
+        <div class="stat-row"><span class="key">CRC errors</span><span class="val" id="crc-err">0</span></div>
+        <div class="stat-row"><span class="key">Latency</span><span class="val" id="latency">2.4 ms</span></div>
+        <div class="stat-row"><span class="key">Baud</span><span class="val">9600</span></div>
+      </section>
+
+    </aside>
+
+    <!-- ===== CENTER STAGE ===== -->
+    <section class="center-stage">
+
+      <!-- Battery column -->
+      <div class="battery-column">
+        <div class="battery-label">BATTERY</div>
+        <div class="battery-bar">
+          <div class="battery-fill" id="battery-fill" style="height: 72%"></div>
+          <div class="battery-cells">
+            <div></div><div></div><div></div><div></div>
+            <div></div><div></div><div></div><div></div>
+          </div>
+        </div>
+        <div class="battery-stats">
+          <div class="battery-pct" id="battery-pct">72%</div>
+          <div class="battery-sub" id="battery-volts">24.8V</div>
+          <div class="battery-sub" id="battery-amps">2.1A</div>
+          <span class="upcoming-tag">MVP-3</span>
+        </div>
+      </div>
+
+      <!-- Central gauge -->
+      <div class="gauge-stage">
+        <div class="gauge-wrapper">
+          <svg class="gauge-svg" viewBox="0 0 400 400" id="gauge-svg">
+            <!-- Track outer -->
+            <circle class="gauge-track-outer"
+                    cx="200" cy="200" r="160"
+                    stroke-dasharray="754 1005"
+                    transform="rotate(135 200 200)" />
+            <!-- Track inner -->
+            <circle class="gauge-track-inner"
+                    cx="200" cy="200" r="125"
+                    stroke-dasharray="589 785"
+                    transform="rotate(135 200 200)" />
+            <!-- Target arc (cyan, inner, thin) -->
+            <circle class="gauge-arc-target"
+                    cx="200" cy="200" r="125"
+                    stroke-dasharray="589 785"
+                    stroke-dashoffset="589"
+                    transform="rotate(135 200 200)"
+                    id="arc-target" />
+            <!-- Current arc (amber, outer, thick) -->
+            <circle class="gauge-arc-current"
+                    cx="200" cy="200" r="160"
+                    stroke-dasharray="754 1005"
+                    stroke-dashoffset="754"
+                    transform="rotate(135 200 200)"
+                    id="arc-current" />
+
+            <!-- Ticks and labels (drawn in JS) -->
+            <g id="gauge-ticks"></g>
+          </svg>
+
+          <!-- Center digital display -->
+          <div class="gauge-center">
+            <div class="gauge-value-row">
+              <span class="gauge-value" id="gauge-value">000</span>
+            </div>
+            <div class="gauge-unit" id="gauge-unit">PWM ‰</div>
+            <div class="gauge-mode" id="gauge-mode">ECO</div>
+            <div class="gauge-control-source">
+              <span id="ctl-src" class="src-pedals">PEDALS · LIVE</span>
+            </div>
+            <div class="gauge-legend">
+              <span class="gauge-legend-item"><span class="gauge-legend-swatch current"></span>CURRENT</span>
+              <span class="gauge-legend-item"><span class="gauge-legend-swatch target"></span>TARGET</span>
+            </div>
+          </div>
+
+          <!-- PWM / Speed toggle -->
+          <div class="display-toggle" id="display-toggle">
+            <button class="active" data-mode="pwm">PWM</button>
+            <button data-mode="speed">SPEED</button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ===== RIGHT PANEL — Charts ===== -->
+    <aside class="right-panel">
+
+      <div class="chart-tabs">
+        <button class="chart-tab active">PWM</button>
+        <button class="chart-tab active">Pedals</button>
+        <button class="chart-tab active">Power L/R</button>
+        <button class="chart-tab upcoming">Current</button>
+        <button class="chart-tab upcoming">Speed</button>
+        <button class="chart-tab upcoming">Steering</button>
+      </div>
+
+      <div class="chart-stack">
+
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">PWM TARGET / CURRENT</span>
+            <span class="chart-legend">
+              <span class="chart-legend-item"><span class="chart-legend-dot" style="background: var(--accent-current)"></span><span id="legend-current">000</span></span>
+              <span class="chart-legend-item"><span class="chart-legend-dot" style="background: var(--accent-target)"></span><span id="legend-target">000</span></span>
+            </span>
+          </div>
+          <div class="chart-canvas-wrap">
+            <canvas id="chart-pwm" role="img" aria-label="PWM target vs current over time"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">PEDAL INPUT</span>
+            <span class="chart-legend">
+              <span class="chart-legend-item"><span class="chart-legend-dot" style="background: var(--accent-gas)"></span><span id="legend-gas">000</span></span>
+              <span class="chart-legend-item"><span class="chart-legend-dot" style="background: var(--accent-brake)"></span><span id="legend-brake">000</span></span>
+            </span>
+          </div>
+          <div class="chart-canvas-wrap">
+            <canvas id="chart-pedals" role="img" aria-label="Gas and brake pedal inputs over time"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-header">
+            <span class="chart-title">POWER PER WHEEL <span class="upcoming-tag">MVP-2</span></span>
+            <span class="chart-legend">
+              <span class="chart-legend-item"><span class="chart-legend-dot" style="background: #b794f6"></span>L</span>
+              <span class="chart-legend-item"><span class="chart-legend-dot" style="background: #f472b6"></span>R</span>
+            </span>
+          </div>
+          <div class="chart-canvas-wrap">
+            <canvas id="chart-power" role="img" aria-label="Power per wheel placeholder"></canvas>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- ==========================================================
+       BOTTOM BAR — Manual control
+       ========================================================== -->
+  <footer class="bottom-bar">
+
+    <div class="slider-group">
+      <div class="slider-row gas">
+        <span class="slider-label">GAS</span>
+        <div class="slider">
+          <div class="slider-track">
+            <div class="slider-fill" id="gas-fill" style="width: 0%"></div>
+            <div class="slider-thumb" id="gas-thumb" style="left: 0%"></div>
+          </div>
+          <input type="range" min="0" max="1023" value="0" id="gas-slider">
+        </div>
+        <div class="slider-value"><span id="gas-value" class="mono">0000</span><span class="max">/1023</span></div>
+      </div>
+      <div class="slider-row brake">
+        <span class="slider-label">BRAKE</span>
+        <div class="slider">
+          <div class="slider-track">
+            <div class="slider-fill" id="brake-fill" style="width: 0%"></div>
+            <div class="slider-thumb" id="brake-thumb" style="left: 0%"></div>
+          </div>
+          <input type="range" min="0" max="1023" value="0" id="brake-slider">
+        </div>
+        <div class="slider-value"><span id="brake-value" class="mono">0000</span><span class="max">/1023</span></div>
+      </div>
+    </div>
+
+    <div class="mode-buttons">
+      <button class="mode-btn">LCK</button>
+      <button class="mode-btn">NEU</button>
+      <button class="mode-btn">HBR</button>
+      <button class="mode-btn active" data-mode="ECO">ECO</button>
+      <button class="mode-btn" data-mode="NORMAL">NRM</button>
+      <button class="mode-btn" data-mode="SPORT">SPT</button>
+      <button class="mode-btn" data-mode="REVERSE">REV</button>
+      <button class="mode-btn">PRT</button>
+    </div>
+
+    <div class="action-buttons">
+      <button class="btn-release" id="btn-release">RELEASE<br>TO PEDALS</button>
+      <button class="btn-estop" id="btn-estop">
+        <span class="estop-glow"></span>
+        E·STOP
+      </button>
+    </div>
+
+  </footer>
+
+</div>
+
+<script>
+/* ================================================================
+   SIMULATION STATE
+   ================================================================ */
+const state = {
+  gas: 0,
+  brake: 0,
+  uartSpeed: 0,
+  uartBrake: 0,
+  controlSource: 'PEDALS',
+  mode: 'ECO',
+  targetPwm: 0,
+  currentPwm: 0,
+  maxPwm: 400,
+  accelRate: 200,    // PWM per second
+  decelRate: 400,
+  brakeRateMin: 300,
+  brakeRateMax: 1500,
+  battery: 72,
+  voltage: 24.8,
+  amps: 2.1,
+  uptime: 0,
+  displayMode: 'pwm', // 'pwm' or 'speed'
+};
+
+const profiles = {
+  LOCKED:    { maxPwm: 0,    accel: 0,   decel: 0,   freq: 7812 },
+  NEUTRAL:   { maxPwm: 0,    accel: 0,   decel: 0,   freq: 7812 },
+  HBR:       { maxPwm: 0,    accel: 0,   decel: 0,   freq: 7812 },
+  ECO:       { maxPwm: 400,  accel: 200, decel: 400, freq: 7812 },
+  NORMAL:    { maxPwm: 716,  accel: 400, decel: 600, freq: 7812 },
+  SPORT:     { maxPwm: 1023, accel: 800, decel: 800, freq: 15625 },
+  REVERSE:   { maxPwm: 300,  accel: 150, decel: 400, freq: 7812 },
+  PARENT:    { maxPwm: 500,  accel: 300, decel: 500, freq: 7812 },
+};
+
+/* ================================================================
+   GAUGE — Build ticks and labels in SVG
+   ================================================================ */
+function buildGaugeTicks() {
+  const g = document.getElementById('gauge-ticks');
+  const cx = 200, cy = 200;
+  const rTickStart = 178;  // outer edge ticks
+  const rTickEnd   = 168;
+  const rLabel     = 152;
+  // Sweep: 135° to 405° (270° total)
+  // We want 0% at 135°, 100% at 405° (=45°)
+  for (let i = 0; i <= 10; i++) {
+    const pct = i * 10;
+    const angle = (135 + (pct / 100) * 270) * Math.PI / 180;
+    const x1 = cx + Math.cos(angle) * rTickStart;
+    const y1 = cy + Math.sin(angle) * rTickStart;
+    const x2 = cx + Math.cos(angle) * rTickEnd;
+    const y2 = cy + Math.sin(angle) * rTickEnd;
+    const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    tick.setAttribute('x1', x1); tick.setAttribute('y1', y1);
+    tick.setAttribute('x2', x2); tick.setAttribute('y2', y2);
+    tick.setAttribute('class', i % 2 === 0 ? 'gauge-tick major' : 'gauge-tick');
+    g.appendChild(tick);
+
+    if (i % 2 === 0) {
+      const lx = cx + Math.cos(angle) * rLabel;
+      const ly = cy + Math.sin(angle) * rLabel + 4;
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', lx);
+      label.setAttribute('y', ly);
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('class', 'gauge-tick-label');
+      label.textContent = pct;
+      g.appendChild(label);
+    }
+  }
+  // Minor ticks
+  for (let i = 0; i <= 50; i++) {
+    if (i % 5 === 0) continue;
+    const pct = i * 2;
+    const angle = (135 + (pct / 100) * 270) * Math.PI / 180;
+    const x1 = cx + Math.cos(angle) * 173;
+    const y1 = cy + Math.sin(angle) * 173;
+    const x2 = cx + Math.cos(angle) * 168;
+    const y2 = cy + Math.sin(angle) * 168;
+    const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    tick.setAttribute('x1', x1); tick.setAttribute('y1', y1);
+    tick.setAttribute('x2', x2); tick.setAttribute('y2', y2);
+    tick.setAttribute('class', 'gauge-tick');
+    g.appendChild(tick);
+  }
+}
+buildGaugeTicks();
+
+/* ================================================================
+   GAUGE UPDATE
+   ================================================================ */
+const ARC_LEN_OUTER = 754;  // 270° of r=160 circumference (2*PI*160 * 0.75 ≈ 754)
+const ARC_LEN_INNER = 589;  // 270° of r=125
+
+function updateGauge() {
+  const targetPct = Math.min(100, (state.targetPwm / 1023) * 100);
+  const currentPct = Math.min(100, (state.currentPwm / 1023) * 100);
+
+  document.getElementById('arc-current').setAttribute(
+    'stroke-dashoffset', ARC_LEN_OUTER - (ARC_LEN_OUTER * currentPct / 100)
+  );
+  document.getElementById('arc-target').setAttribute(
+    'stroke-dashoffset', ARC_LEN_INNER - (ARC_LEN_INNER * targetPct / 100)
+  );
+
+  // Center display
+  let valueText, unitText;
+  if (state.displayMode === 'pwm') {
+    valueText = String(Math.round(state.currentPwm)).padStart(3, '0');
+    unitText = 'PWM ‰';
+  } else {
+    // Fake speed: km/h based on PWM (placeholder until encoders)
+    const fakeKmh = (state.currentPwm / 1023) * 12;
+    valueText = fakeKmh.toFixed(1);
+    unitText = 'KM / H';
+  }
+  document.getElementById('gauge-value').textContent = valueText;
+  document.getElementById('gauge-unit').textContent = unitText;
+}
+
+/* ================================================================
+   SLIDERS
+   ================================================================ */
+function setupSlider(id, valueId, fillId, thumbId, onChange) {
+  const input = document.getElementById(id);
+  const valueEl = document.getElementById(valueId);
+  const fillEl = document.getElementById(fillId);
+  const thumbEl = document.getElementById(thumbId);
+  input.addEventListener('input', () => {
+    const v = parseInt(input.value);
+    valueEl.textContent = String(v).padStart(4, '0');
+    const pct = (v / 1023) * 100;
+    fillEl.style.width = pct + '%';
+    thumbEl.style.left = pct + '%';
+    onChange(v);
+  });
+}
+setupSlider('gas-slider', 'gas-value', 'gas-fill', 'gas-thumb', v => {
+  state.gas = v;
+  // Slider acts like a UART command in the mockup
+  state.uartSpeed = v;
+  if (v > 0) state.controlSource = 'UART';
+});
+setupSlider('brake-slider', 'brake-value', 'brake-fill', 'brake-thumb', v => {
+  state.brake = v;
+  state.uartBrake = v;
+  if (v > 0) state.controlSource = 'UART';
+});
+
+/* ================================================================
+   BUTTONS
+   ================================================================ */
+document.getElementById('btn-release').addEventListener('click', () => {
+  state.controlSource = 'PEDALS';
+  state.uartSpeed = 0;
+  state.uartBrake = 0;
+  document.getElementById('gas-slider').value = 0;
+  document.getElementById('brake-slider').value = 0;
+  document.getElementById('gas-slider').dispatchEvent(new Event('input'));
+  document.getElementById('brake-slider').dispatchEvent(new Event('input'));
+});
+
+document.getElementById('btn-estop').addEventListener('click', () => {
+  state.controlSource = 'UART';
+  state.uartSpeed = 0;
+  state.uartBrake = 1023;
+  document.getElementById('brake-slider').value = 1023;
+  document.getElementById('brake-slider').dispatchEvent(new Event('input'));
+});
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const mode = btn.dataset.mode;
+    if (!mode || !profiles[mode]) return;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.mode = mode;
+    state.maxPwm = profiles[mode].maxPwm;
+    state.accelRate = profiles[mode].accel;
+    state.decelRate = profiles[mode].decel;
+    document.getElementById('gauge-mode').textContent = mode === 'NORMAL' ? 'NRM' : (mode === 'SPORT' ? 'SPT' : (mode === 'REVERSE' ? 'REV' : mode));
+    document.getElementById('pwm-freq').textContent = profiles[mode].freq + ' Hz';
+  });
+});
+
+document.querySelectorAll('.display-toggle button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.display-toggle button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.displayMode = btn.dataset.mode;
+    updateGauge();
+  });
+});
+
+document.getElementById('src-pedals').addEventListener('click', () => {
+  state.controlSource = 'PEDALS';
+});
+document.getElementById('src-uart').addEventListener('click', () => {
+  state.controlSource = 'UART';
+});
+
+/* ================================================================
+   CHARTS — Chart.js with rolling time window
+   ================================================================ */
+const CHART_POINTS = 100;  // ~10 seconds at 10Hz
+const tlabels = Array(CHART_POINTS).fill('');
+
+function makeChart(canvasId, datasetsConfig, yMin, yMax) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: tlabels.slice(),
+      datasets: datasetsConfig.map(d => ({
+        label: d.label,
+        data: Array(CHART_POINTS).fill(null),
+        borderColor: d.color,
+        backgroundColor: d.color + '20',
+        borderWidth: 1.5,
+        fill: d.fill || false,
+        tension: 0.2,
+        pointRadius: 0,
+        borderDash: d.dash || [],
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          display: false,
+          grid: { display: false },
+        },
+        y: {
+          min: yMin, max: yMax,
+          grid: { color: 'rgba(255,255,255,0.04)', drawBorder: false },
+          ticks: {
+            color: '#5a6171',
+            font: { family: 'Geist Mono', size: 9, weight: '500' },
+            maxTicksLimit: 4,
+          },
+          border: { display: false },
+        },
+      },
+      interaction: { intersect: false },
+    },
+  });
+}
+
+const chartPwm = makeChart('chart-pwm', [
+  { label: 'Current', color: '#f5a623' },
+  { label: 'Target',  color: '#5dc8e3', dash: [3, 3] },
+], 0, 1023);
+
+const chartPedals = makeChart('chart-pedals', [
+  { label: 'Gas',   color: '#4ade80' },
+  { label: 'Brake', color: '#ef4444' },
+], 0, 1023);
+
+const chartPower = makeChart('chart-power', [
+  { label: 'Left',  color: '#b794f6' },
+  { label: 'Right', color: '#f472b6' },
+], 0, 50);
+
+function pushChart(chart, values) {
+  chart.data.datasets.forEach((ds, i) => {
+    ds.data.shift();
+    ds.data.push(values[i]);
+  });
+  chart.update('none');
+}
+
+/* ================================================================
+   MAIN SIMULATION LOOP
+   ================================================================ */
+const tickRate = 100;  // ms (10 Hz)
+let startTime = Date.now();
+
+function simStep() {
+  // Compute target/brake from control source
+  let target, brake;
+  if (state.controlSource === 'UART') {
+    target = Math.min(state.uartSpeed, state.maxPwm);
+    brake  = state.uartBrake;
+  } else {
+    // Pedals: map gas to maxPwm, brake takes priority
+    target = brake = 0;
+    target = Math.round(state.gas * state.maxPwm / 1023);
+    brake  = state.brake;
+    if (brake > 0) target = 0;
+  }
+  state.targetPwm = target;
+
+  // Ramp current toward target
+  const dt = tickRate / 1000;
+  if (brake > 0) {
+    const brakeRate = state.brakeRateMin + (state.brakeRateMax - state.brakeRateMin) * (brake / 1023);
+    state.currentPwm = Math.max(0, state.currentPwm - brakeRate * dt);
+  } else if (state.currentPwm < target) {
+    state.currentPwm = Math.min(target, state.currentPwm + state.accelRate * dt);
+  } else if (state.currentPwm > target) {
+    state.currentPwm = Math.max(target, state.currentPwm - state.decelRate * dt);
+  }
+
+  // Battery slowly drains
+  state.battery = Math.max(20, state.battery - 0.002 * (state.currentPwm / 1023));
+  state.voltage = 22 + 0.04 * state.battery;
+  state.amps = 0.5 + (state.currentPwm / 1023) * 6;
+
+  // Uptime
+  state.uptime = Math.floor((Date.now() - startTime) / 1000);
+
+  // ===== Update DOM =====
+  updateGauge();
+
+  // Header
+  const h = Math.floor(state.uptime / 3600);
+  const m = Math.floor(state.uptime / 60) % 60;
+  const s = state.uptime % 60;
+  document.getElementById('uptime').textContent =
+    String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+
+  // Battery
+  document.getElementById('battery-fill').style.height = state.battery + '%';
+  document.getElementById('battery-pct').textContent = Math.round(state.battery) + '%';
+  document.getElementById('battery-volts').textContent = state.voltage.toFixed(1) + 'V';
+  document.getElementById('battery-amps').textContent = state.amps.toFixed(1) + 'A';
+  const bfill = document.getElementById('battery-fill');
+  bfill.classList.toggle('warn', state.battery < 35 && state.battery >= 20);
+  bfill.classList.toggle('crit', state.battery < 20);
+
+  // Control source indicator
+  const ctlSrc = document.getElementById('ctl-src');
+  ctlSrc.textContent = state.controlSource + (state.controlSource === 'PEDALS' ? ' · LIVE' : ' · OVERRIDE');
+  ctlSrc.className = state.controlSource === 'PEDALS' ? 'src-pedals' : 'src-uart';
+
+  document.getElementById('src-pedals').classList.toggle('active', state.controlSource === 'PEDALS');
+  document.getElementById('src-uart').classList.toggle('active', state.controlSource === 'UART');
+
+  // Chart legends
+  document.getElementById('legend-current').textContent = String(Math.round(state.currentPwm)).padStart(4, '0');
+  document.getElementById('legend-target').textContent  = String(Math.round(state.targetPwm)).padStart(4, '0');
+  document.getElementById('legend-gas').textContent     = String(state.gas).padStart(4, '0');
+  document.getElementById('legend-brake').textContent   = String(state.brake).padStart(4, '0');
+
+  // Push to charts
+  pushChart(chartPwm,    [state.currentPwm, state.targetPwm]);
+  pushChart(chartPedals, [state.gas, state.brake]);
+  // Fake power: amps * voltage * (left/right balance)
+  const pwr = state.amps * state.voltage;
+  pushChart(chartPower,  [pwr / 2 + Math.random() * 1.5, pwr / 2 + Math.random() * 1.5]);
+}
+
+setInterval(simStep, tickRate);
+
+// Auto-demo: gentle gas pulse so the dashboard looks alive on load
+setTimeout(() => {
+  const sliderEl = document.getElementById('gas-slider');
+  let t = 0;
+  setInterval(() => {
+    if (Math.random() > 0.97) {
+      // Skip if user is interacting
+      if (document.activeElement === sliderEl) return;
+      const newValue = Math.round(200 + Math.sin(t / 4) * 200 + Math.random() * 100);
+      sliderEl.value = Math.max(0, Math.min(800, newValue));
+      sliderEl.dispatchEvent(new Event('input'));
+      t++;
+    }
+  }, 300);
+}, 2000);
+</script>
+
+</body>
+</html>

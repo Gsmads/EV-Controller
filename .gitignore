@@ -1,0 +1,33 @@
+# Build artifacts
+*.o
+*.obj
+*.exe
+*.out
+*.elf
+*.hex
+*.bin
+
+# Test binaries (no extension on Linux/Mac)
+tests/test_util_math
+tests/test_cfg_settings
+tests/test_svc_ramp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Arduino build
+build/
+*.tmp
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
