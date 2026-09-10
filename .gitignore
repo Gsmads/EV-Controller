@@ -8,9 +8,12 @@
 *.bin
 
 # Test binaries (no extension on Linux/Mac)
-tests/test_util_math
-tests/test_cfg_settings
-tests/test_svc_ramp
+# Шаблоном, а не поимённо: имена в Makefile и здесь иначе разъезжаются, и
+# четвёртый тест уходит в коммит собранным. Исходники исключены обратно.
+tests/test_*
+!tests/test_*.c
+!tests/test_*.cpp
+!tests/test_*.h
 
 # Python
 __pycache__/
