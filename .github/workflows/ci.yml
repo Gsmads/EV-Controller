@@ -11,8 +11,9 @@
 #      Arduino-тулчейна и сегодня всё равно невозможна: EV_Controller.ino:152
 #      вызывает hal_uart_init(UART_BAUD_DEBUG), а такого макроса в репозитории
 #      нет ни в одном заголовке;
-#    - сторожей границ слоёв (задачи 0.2.4 и 0.2.5) здесь пока нет: на текущем
-#      коде они красные, решение по ним за владельцем;
+#    - сторожа границ слоёв (0.2.4, 0.2.5) работают со списком временных
+#      исключений: ADR-0014, снимаются задачами #31 и #32. Чего не покрывают
+#      сами сторожа — перечислено в шапке tools/ci/check_layer_boundaries.py;
 #    - предупреждения компилятора не блокируют. `make run` идёт на -Wall -Wextra
 #      и сегодня чист, но `make verbose` (+ -Wpedantic -Wshadow -Wcast-align
 #      -Wconversion) даёт 103 предупреждения и в CI не включён;
@@ -47,6 +48,12 @@ jobs:
       # git, а не каталог, поэтому на собранные файлы он и так не реагирует.
       - name: Сторож — в tests/ только исходники
         run: tools/ci/check_no_test_binaries.sh
+
+      - name: Сторож — платформенные заголовки только в HAL
+        run: tools/ci/check_layer_boundaries.py headers
+
+      - name: Сторож — функции Arduino не вызываются
+        run: tools/ci/check_layer_boundaries.py functions
 
       - name: Сборка и прогон тестов
         working-directory: tests
