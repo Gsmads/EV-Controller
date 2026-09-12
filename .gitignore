@@ -8,9 +8,12 @@
 *.bin
 
 # Test binaries (no extension on Linux/Mac)
-tests/test_util_math
-tests/test_cfg_settings
-tests/test_svc_ramp
+# Шаблоном, а не поимённо: имена в Makefile и здесь иначе разъезжаются, и
+# четвёртый тест уходит в коммит собранным. Исходники исключены обратно.
+tests/test_*
+!tests/test_*.c
+!tests/test_*.cpp
+!tests/test_*.h
 
 # Python
 __pycache__/
@@ -31,3 +34,9 @@ build/
 *~
 .DS_Store
 Thumbs.db
+
+# Рабочие копии агентов Claude Code
+# Изолированные git-worktree, создаются на время параллельной работы и
+# удаляются после. Внутри — второй чекаут этого же репозитория, включая
+# собранные бинарники тестов: в историю попасть не должно.
+.claude/worktrees/

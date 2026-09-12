@@ -11,9 +11,15 @@
 ## 1. Границы, которые не пересекаются
 
 1. **Платформозависимый код — только в `hal_<platform>.cpp`.**
-   `Arduino.h`, `avr/io.h`, `avr/interrupt.h`, `avr/eeprom.h`, `avr/wdt.h`
-   не имеют права появиться ни в одном файле `svc_*`, `util_*`, `cfg_*`,
-   `app_*`, `drv_*`. Проверяется сторожем в CI.
+   `Arduino.h` и заголовки ядра Arduino (`wiring_private.h`,
+   `HardwareSerial.h`, `Print.h` и прочие), а также всё из пространств
+   avr-libc — `avr/*`, `util/*`, `compat/*` — не имеют права появиться ни
+   в одном файле `svc_*`, `util_*`, `cfg_*`, `app_*`, `drv_*`.
+   Пространствами, а не пятью именами: `util/delay.h` даёт `_delay_ms`,
+   то есть ровно ту блокировку, которую запрещает правило 4, и списком
+   из пяти заголовков не ловится.
+   Проверяется сторожем в CI — `tools/ci/check_layer_boundaries.py`,
+   его собственная самопроверка — `tools/ci/test_check_layer_boundaries.py`.
 
 2. **Функции Arduino не используются нигде, включая HAL.**
    `digitalWrite`, `digitalRead`, `pinMode`, `analogRead`, `analogWrite`,
