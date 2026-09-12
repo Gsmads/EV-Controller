@@ -57,7 +57,6 @@ declare -A PLATFORM_BOUND=(
 # проверка падает и требует убрать запись.
 declare -A KNOWN_BROKEN=(
     [svc_pedals.cpp]="AUDIT B-5: cfg_board.h:41-42 использует макросы A0/A1 из Arduino.h"
-    [app_protocol.cpp]="AUDIT B-5: NULL на строке 190 без stddef.h"
 )
 
 fail=0
