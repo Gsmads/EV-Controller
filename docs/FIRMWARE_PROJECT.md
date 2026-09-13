@@ -59,7 +59,7 @@ firmware/
 ├── app_main.h/.cpp                ← Кооперативный планировщик
 ├── app_protocol.h/.cpp            ← Бинарный протокол UART/RS485
 ├── app_debug.h/.cpp               ← Текстовая телеметрия
-├── MICRO_UART.h/.cpp              ← UART драйвер из Grbl
+├── util_ring.h/.cpp               ← кольцевой буфер UART (переносимый)
 ├── PRINT.h/.cpp                   ← Форматирование без sprintf
 └── Inc.h                          ← Мастер-include
 ```
@@ -70,7 +70,7 @@ firmware/
 - GPIO (через регистры или Arduino API)
 - ADC 10-bit
 - PWM на Timer1 (10/9-bit, Phase-Correct/Fast, конфигурируемая частота)
-- UART (обёртка над MICRO_UART + DE/RE для RS485)
+- UART (регистры USART0 + кольца util_ring + DE/RE для RS485)
 - EEPROM
 - System (millis, watchdog, IRQ save/restore)
 - Encoder ISR на INT0 (D2) / INT1 (D3) — для энкодеров колёс
@@ -163,7 +163,8 @@ svc_motor_set_pwm(pwm);
 cd tests
 make run
 ```
-Сейчас 71 тест: util_math (33), cfg_settings (28), svc_ramp (10).
+Сейчас 135 тестов: util_math (33), cfg_settings (44), svc_ramp (10),
+util_ring (48).
 
 ### Тесты, которые нужно добавить
 - [ ] `test_svc_pedals.c` — тестировать combinator во всех режимах,

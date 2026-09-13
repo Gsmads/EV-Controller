@@ -42,7 +42,7 @@
 | `pinMode()` | HAL GPIO | Обёртка для портируемости |
 | `millis()` | HAL System | Обёртка для портируемости |
 | `delay()` | **Запрещён** | Блокирует управление, нарушает тактирование |
-| `Serial.print()` | MICRO_UART + PRINT | Экономия Flash, interrupt-driven |
+| `Serial.print()` | `hal_uart` + PRINT | Экономия Flash, interrupt-driven |
 | `Wire` (I2C) | HAL I2C | Обёртка для портируемости |
 | `SPI` | HAL SPI | Обёртка для портируемости |
 
@@ -336,7 +336,9 @@ void     hal_uart_flush_rx(void);
 void     hal_uart_set_rs485_dir(uint8_t tx_mode); // Управление DE/RE
 ```
 
-Внутри — обёртка над MICRO_UART с добавлением RS485 DE/RE.
+Внутри — регистры USART0 и кольца `util_ring` с добавлением RS485 DE/RE
+(ADR-0018). Переносимая часть буферов вынесена в `util_ring` и покрыта
+десктопными тестами; здесь остаётся то, что проверяется только на железе.
 
 ### 4.6 hal_spi
 

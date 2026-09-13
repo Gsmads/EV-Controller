@@ -19,6 +19,8 @@
 #include "svc_speed.h"
 #include "util_crc.h"
 
+#include <stddef.h>  /* NULL */
+
 /* ====================================================================
  *  Состояния парсера
  * ==================================================================== */
@@ -47,6 +49,9 @@ static uint16_t pkt_crc_received;
 
 static void send_packet(uint8_t cmd, const uint8_t *payload, uint8_t payload_len)
 {
+    if (payload_len > PROTO_MAX_PAYLOAD) {
+        return;                 /* кадр такой длины протоколом не предусмотрен */
+    }
     uint8_t len = 1 + payload_len;
 
     uint16_t crc = 0xFFFF;
@@ -56,14 +61,25 @@ static void send_packet(uint8_t cmd, const uint8_t *payload, uint8_t payload_len
         crc = util_crc16_update(crc, payload[i]);
     }
 
-    hal_uart_write(PROTO_SYNC);
-    hal_uart_write(len);
-    hal_uart_write(cmd);
+    /* Кадр собирается целиком и уходит одним блоком: решение об отбрасывании
+       принимается там, где известна его длина (ADR-0016). Побайтовая отправка
+       не давала такой возможности — при нехватке места кадр уходил бы в линию
+       усечённым, то есть валидным по длине и битым по CRC.
+
+       Буфер статический, а не на стеке: 65 байт — заметная доля стека AVR,
+       а функция не реентерантна и из обработчиков прерываний не вызывается. */
+    static uint8_t frame[PROTO_MAX_PAYLOAD + 5];
+    uint8_t n = 0;
+    frame[n++] = PROTO_SYNC;
+    frame[n++] = len;
+    frame[n++] = cmd;
     for (uint8_t i = 0; i < payload_len; i++) {
-        hal_uart_write(payload[i]);
+        frame[n++] = payload[i];
     }
-    hal_uart_write((uint8_t)(crc & 0xFF));
-    hal_uart_write((uint8_t)(crc >> 8));
+    frame[n++] = (uint8_t)(crc & 0xFF);
+    frame[n++] = (uint8_t)(crc >> 8);
+
+    (void)hal_uart_write_buf(frame, n);
 }
 
 static void send_ack(uint8_t original_cmd)
@@ -264,9 +280,9 @@ void app_protocol_update(void)
     /* До 16 байт за вызов, чтобы не блокировать */
     uint8_t max_bytes = 16;
     while (max_bytes-- > 0) {
-        uint8_t byte = hal_uart_read();
-        if (byte == HAL_UART_NO_DATA) break;
-        parser_feed(byte);
+        int16_t byte = hal_uart_read();
+        if (byte < 0) break;    /* B-2: пустота непредставима в данных */
+        parser_feed((uint8_t)byte);
     }
 }
 

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stddef.h>
 #include "../firmware/cfg_settings.h"
+#include "../firmware/util_crc.h"
 
 static int pass = 0, fail = 0;
 #define ASSERT(cond, msg) do { if (cond) pass++; else { printf("  FAIL: %s\n", msg); fail++; } } while(0)
@@ -159,6 +160,106 @@ void test_settings_size(void) {
     ASSERT(sz < 800, "settings leaves room for future expansion");
 }
 
+
+/* ==== Параметры UART (v3): ADR-0016, ADR-0019 ==== */
+
+void test_uart_defaults(void) {
+    printf("--- test_uart_defaults ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+    cfg_settings_init();
+    const settings_t *s = cfg_settings_get();
+
+    ASSERT_EQ(UART_BAUD_CODE_250000, s->uart_baud_code,
+              "ADR-0015: умолчание скорости — 250000");
+    ASSERT_EQ(TX_OVERFLOW_DROP_PACKET, s->uart_tx_policy,
+              "ADR-0016: умолчание политики — отбрасывать пакет, а не ждать");
+    ASSERT_EQ(10000, s->uart_baud_probation_ms,
+              "ADR-0019: испытательный период 10 секунд");
+}
+
+void test_baud_table(void) {
+    printf("--- test_baud_table ---\n");
+    ASSERT_EQ(9600,   cfg_settings_baud_from_code(UART_BAUD_CODE_9600),   "код 0 -> 9600");
+    ASSERT_EQ(115200, cfg_settings_baud_from_code(UART_BAUD_CODE_115200), "код 4 -> 115200");
+    ASSERT_EQ(250000, cfg_settings_baud_from_code(UART_BAUD_CODE_250000), "код 5 -> 250000");
+    ASSERT_EQ(500000, cfg_settings_baud_from_code(UART_BAUD_CODE_500000), "код 6 -> 500000");
+    ASSERT_EQ(0, cfg_settings_baud_from_code(UART_BAUD_CODE_COUNT),
+              "код вне таблицы даёт 0, а не подстановку умолчания молча");
+    ASSERT_EQ(0, cfg_settings_baud_from_code(255), "заведомо чужой код тоже 0");
+}
+
+/* Собираем в мок-EEPROM блок настроек версии 2 и проверяем, что миграция
+   сохраняет калибровку педалей. Прежний код на несовпадении версии просто
+   сбрасывал всё к умолчаниям — а калибровку добывают замерами на железе. */
+void test_migration_from_v2(void) {
+    printf("--- test_migration_from_v2 ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+
+    const uint16_t V2_SIZE = 182;
+    const uint16_t DATA_OFF = 4;
+
+    /* Данные версии 2: узнаваемый образец плюс калибровка в известных местах */
+    uint8_t v2[182];
+    for (uint16_t i = 0; i < V2_SIZE; i++) v2[i] = (uint8_t)(i & 0xFF);
+    /* pedal_gas_min = 123, pedal_gas_max = 987 — первые два поля структуры */
+    v2[0] = 123 & 0xFF; v2[1] = (123 >> 8) & 0xFF;
+    v2[2] = 987 & 0xFF; v2[3] = (987 >> 8) & 0xFF;
+
+    /* Заголовок: magic, version = 2 */
+    mock_eeprom[0] = SETTINGS_MAGIC & 0xFF;
+    mock_eeprom[1] = (SETTINGS_MAGIC >> 8) & 0xFF;
+    mock_eeprom[2] = 2;
+    mock_eeprom[3] = 0;
+    memcpy(mock_eeprom + DATA_OFF, v2, V2_SIZE);
+
+    /* CRC по правилам версии 2: magic + version(2) + reserved + 182 байта */
+    uint16_t crc = 0xFFFF;
+    crc = util_crc16_update(crc, (uint8_t)(SETTINGS_MAGIC & 0xFF));
+    crc = util_crc16_update(crc, (uint8_t)(SETTINGS_MAGIC >> 8));
+    crc = util_crc16_update(crc, 2);
+    crc = util_crc16_update(crc, 0);
+    for (uint16_t i = 0; i < V2_SIZE; i++) crc = util_crc16_update(crc, v2[i]);
+    mock_eeprom[DATA_OFF + V2_SIZE]     = (uint8_t)(crc & 0xFF);
+    mock_eeprom[DATA_OFF + V2_SIZE + 1] = (uint8_t)(crc >> 8);
+
+    cfg_settings_init();
+    const settings_t *s = cfg_settings_get();
+
+    ASSERT_EQ(1, cfg_settings_is_loaded_from_eeprom(),
+              "миграция: настройки взяты из EEPROM, а не сброшены");
+    ASSERT_EQ(123, s->pedal_gas_min, "миграция: калибровка педали газа сохранена");
+    ASSERT_EQ(987, s->pedal_gas_max, "миграция: верхняя точка сохранена");
+    ASSERT_EQ(UART_BAUD_CODE_250000, s->uart_baud_code,
+              "миграция: новое поле получило умолчание");
+    ASSERT_EQ(TX_OVERFLOW_DROP_PACKET, s->uart_tx_policy,
+              "миграция: политика получила умолчание");
+}
+
+void test_migration_rejects_corrupt_v2(void) {
+    printf("--- test_migration_rejects_corrupt_v2 ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+    mock_eeprom[0] = SETTINGS_MAGIC & 0xFF;
+    mock_eeprom[1] = (SETTINGS_MAGIC >> 8) & 0xFF;
+    mock_eeprom[2] = 2;
+    mock_eeprom[3] = 0;
+    /* Данные есть, CRC мусорный */
+    cfg_settings_init();
+    ASSERT_EQ(0, cfg_settings_is_loaded_from_eeprom(),
+              "повреждённый блок версии 2 не мигрируется, берутся умолчания");
+}
+
+void test_migration_unknown_version(void) {
+    printf("--- test_migration_unknown_version ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+    mock_eeprom[0] = SETTINGS_MAGIC & 0xFF;
+    mock_eeprom[1] = (SETTINGS_MAGIC >> 8) & 0xFF;
+    mock_eeprom[2] = 99;                    /* версия из будущего */
+    mock_eeprom[3] = 0;
+    cfg_settings_init();
+    ASSERT_EQ(0, cfg_settings_is_loaded_from_eeprom(),
+              "незнакомая версия — умолчания, а не попытка угадать раскладку");
+}
+
 int main(void) {
     printf("=========================================\n");
     printf("  cfg_settings Unit Tests\n");
@@ -170,6 +271,11 @@ int main(void) {
     test_drive_profiles();
     test_set_field();
     test_settings_size();
+    test_uart_defaults();
+    test_baud_table();
+    test_migration_from_v2();
+    test_migration_rejects_corrupt_v2();
+    test_migration_unknown_version();
     printf("\n=========================================\n");
     printf("  Results: %d passed, %d failed\n", pass, fail);
     printf("=========================================\n");

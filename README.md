@@ -202,7 +202,7 @@ python server.py            # автопоиск порта
 ### Тесты
 
 ```bash
-cd tests && make run        # 71 тест, ~5 секунд
+cd tests && make run        # 135 тестов, ~5 секунд
 ```
 
 ---
@@ -229,5 +229,8 @@ cd tests && make run        # 71 тест, ~5 секунд
 Проект распространяется под **GNU General Public License v3** — полный текст
 в [LICENSE](LICENSE), основание — [ADR-0013](docs/adr/0013-licenziya-gpl-v3.md).
 
-`firmware/MICRO_UART.*` адаптированы из [Grbl](https://github.com/gnea/grbl)
-(GPL v3) — Sungeun K. Jeon, Simen Svale Skogsrud. Остальной код оригинальный.
+Весь код оригинальный. Драйвер UART был адаптирован из
+[Grbl](https://github.com/gnea/grbl) — Sungeun K. Jeon, Simen Svale Skogsrud, —
+и переписан заново по [ADR-0018](docs/adr/0018-sobstvennyj-drajver-uart.md):
+производного кода в репозитории не осталось. GPL v3 при этом сохраняется:
+лицензия выбрана осознанно, а не вынужденно (ADR-0013).

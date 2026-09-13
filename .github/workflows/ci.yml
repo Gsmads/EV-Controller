@@ -5,9 +5,10 @@
 #  любом failed". Плюс сторож задачи 0.2.6 (в tests/ только исходники).
 #
 #  Чего этот файл НЕ покрывает — честно:
-#    - прошивку целиком он не собирает. В tests/Makefile участвуют четыре файла
-#      из firmware/ (util_math, cfg_settings, util_crc, svc_ramp); остальные
-#      девять .cpp не проверяются даже на синтаксис. Сборка скетча требует
+#    - прошивку целиком он не собирает. Синтаксис каждого модуля проверяется
+#      отдельным шагом (tools/ci/check_modules_compile.sh, задача #33), но это
+#      -fsyntax-only десктопным g++, а не сборка. Компоновки нет, регистров
+#      ATmega328P десктопный компилятор не знает. Сборка скетча требует
 #      Arduino-тулчейна и сегодня всё равно невозможна: EV_Controller.ino:152
 #      вызывает hal_uart_init(UART_BAUD_DEBUG), а такого макроса в репозитории
 #      нет ни в одном заголовке;
@@ -40,7 +41,7 @@ jobs:
 
     steps:
       - name: Забрать код
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Версия компилятора
         run: g++ --version
@@ -61,6 +62,9 @@ jobs:
 
       - name: Сторож — функции Arduino не вызываются
         run: tools/ci/check_layer_boundaries.py functions
+
+      - name: Сторож — каждый модуль firmware/ компилируется
+        run: tools/ci/check_modules_compile.sh
 
       - name: Сборка и прогон тестов
         working-directory: tests

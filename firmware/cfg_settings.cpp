@@ -186,6 +186,24 @@ static void fill_defaults(settings_t *s)
     s->gas_combinator       = PEDAL_COMBINE_MAX;       /* По умолчанию: max(physical, uart) */
     s->brake_combinator     = PEDAL_COMBINE_MAX;       /* Тормоз: всегда max — безопаснее */
     s->uart_pedal_timeout_ms = 200;                     /* Watchdog UART-педали */
+
+    /* --- Параметры UART (v3) --- */
+    s->uart_baud_code         = UART_BAUD_CODE_250000;  /* ADR-0015 */
+    s->uart_tx_policy         = TX_OVERFLOW_DROP_PACKET;/* ADR-0016: умолчание */
+    s->uart_baud_probation_ms = 10000;                  /* ADR-0019 */
+}
+
+/** Таблица скоростей. Порядок соответствует uart_baud_code_t и не меняется. */
+static const uint32_t baud_table[UART_BAUD_CODE_COUNT] = {
+    9600UL, 19200UL, 38400UL, 57600UL, 115200UL, 250000UL, 500000UL
+};
+
+uint32_t cfg_settings_baud_from_code(uint8_t code)
+{
+    if (code >= UART_BAUD_CODE_COUNT) {
+        return 0;   /* недопустимый код отличим от любой настоящей скорости */
+    }
+    return baud_table[code];
 }
 
 /* ====================================================================
@@ -195,13 +213,18 @@ static void fill_defaults(settings_t *s)
 /**
  * @brief Вычислить CRC16 для заголовка + данных
  */
-static uint16_t compute_crc(const settings_t *s)
+/**
+ * @brief CRC блока настроек заданной версии и размера
+ *
+ * Версия и размер — параметры, а не константы, потому что при миграции
+ * надо проверить целостность блока ПРОШЛОЙ версии его же правилами.
+ */
+static uint16_t compute_crc_of(const void *data, uint16_t size, uint8_t version)
 {
     uint16_t crc = 0xFFFF;
 
     /* CRC по magic + version */
     uint16_t magic   = SETTINGS_MAGIC;
-    uint8_t  version = SETTINGS_VERSION;
     uint8_t  reserved= 0;
 
     crc = util_crc16_update(crc, (uint8_t)(magic & 0xFF));
@@ -210,17 +233,54 @@ static uint16_t compute_crc(const settings_t *s)
     crc = util_crc16_update(crc, reserved);
 
     /* CRC по данным */
-    const uint8_t *ptr = (const uint8_t *)s;
-    for (uint16_t i = 0; i < sizeof(settings_t); i++) {
+    const uint8_t *ptr = (const uint8_t *)data;
+    for (uint16_t i = 0; i < size; i++) {
         crc = util_crc16_update(crc, ptr[i]);
     }
 
     return crc;
 }
 
+static uint16_t compute_crc(const settings_t *s)
+{
+    return compute_crc_of(s, sizeof(settings_t), SETTINGS_VERSION);
+}
+
 /* ====================================================================
  *  Публичный API
  * ==================================================================== */
+
+/**
+ * @brief Миграция настроек версии 2 в версию 3
+ *
+ * Поля v3 дописаны в конец структуры, поэтому блок v2 — её префикс:
+ * читаем префикс поверх умолчаний, новые поля остаются с умолчаниями.
+ * Без этого первый же запуск после обновления сбросил бы калибровку
+ * педалей, которую добывают замерами на железе (ADR-0016).
+ *
+ * Целостность блока проверяется правилами его собственной версии.
+ */
+static void migrate_from_v2(void)
+{
+    uint8_t old_data[SETTINGS_SIZE_V2];
+    hal_eeprom_read(EEPROM_DATA_OFFSET, old_data, SETTINGS_SIZE_V2);
+
+    uint8_t crc_buf[2];
+    hal_eeprom_read((uint16_t)(EEPROM_DATA_OFFSET + SETTINGS_SIZE_V2), crc_buf, 2);
+    uint16_t stored_crc = (uint16_t)crc_buf[0] | ((uint16_t)crc_buf[1] << 8);
+
+    if (compute_crc_of(old_data, SETTINGS_SIZE_V2, 2) != stored_crc) {
+        fill_defaults(&current_settings);   /* блок повреждён — не гадаем */
+        return;
+    }
+
+    fill_defaults(&current_settings);       /* новые поля получают умолчания */
+    uint8_t *dst = (uint8_t *)&current_settings;
+    for (uint16_t i = 0; i < SETTINGS_SIZE_V2; i++) {
+        dst[i] = old_data[i];               /* старые поля — из EEPROM */
+    }
+    loaded_from_eeprom = 1;
+}
 
 void cfg_settings_init(void)
 {
@@ -239,11 +299,12 @@ void cfg_settings_init(void)
 
     /* 3. Проверяем версию */
     if (header.version != SETTINGS_VERSION) {
-        /* TODO: миграция между версиями.
-         * Пока — сброс к defaults.
-         * В будущем: загрузить старую структуру, скопировать совпадающие поля,
-         * заполнить новые поля defaults, пересохранить.
-         */
+        if (header.version == 2) {
+            migrate_from_v2();
+            return;
+        }
+        /* Версия, о которой мы ничего не знаем: сброс. Это единственный
+           честный исход — угадывать раскладку чужого блока нельзя. */
         fill_defaults(&current_settings);
         return;
     }

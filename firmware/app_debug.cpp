@@ -4,8 +4,8 @@
  */
 #include "app_debug.h"
 #include "cfg_board.h"
-#include "MICRO_UART.h"
 #include "PRINT.h"
+#include "hal_uart.h"
 
 #ifdef BOARD_DEBUG_ENABLED
 
@@ -14,9 +14,9 @@
  */
 static void print_padded4(uint16_t n)
 {
-    if (n < 1000) serial_write('0');
-    if (n < 100)  serial_write('0');
-    if (n < 10)   serial_write('0');
+    if (n < 1000) hal_uart_write('0');
+    if (n < 100)  hal_uart_write('0');
+    if (n < 10)   hal_uart_write('0');
     print_uint32_base10((uint32_t)n);
 }
 
@@ -43,10 +43,10 @@ void app_debug_telemetry(uint16_t gas, uint16_t brake,
     print_uint32_base10(freq_hz);
 
     printPgmString(PSTR(" R:"));
-    if (current == 0)           serial_write('S');  /* Stopped */
-    else if (current < target)  serial_write('A');  /* Accel */
-    else if (current > target)  serial_write('D');  /* Decel */
-    else                        serial_write('H');  /* Hold */
+    if (current == 0)           hal_uart_write('S');  /* Stopped */
+    else if (current < target)  hal_uart_write('A');  /* Accel */
+    else if (current > target)  hal_uart_write('D');  /* Decel */
+    else                        hal_uart_write('H');  /* Hold */
 
     printPgmString(PSTR("\r\n"));
 }
