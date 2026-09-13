@@ -63,9 +63,13 @@ uint16_t hal_adc_read_signal(analog_signal_t s) {
 }
 uint16_t hal_adc_read(uint8_t c) { (void)c; return 0; }
 void     hal_adc_init(void) {}
-uint16_t hal_encoder_read_and_reset(encoder_channel_t c) { (void)c; return 0; }
-uint16_t hal_encoder_get_count(encoder_channel_t c) { (void)c; return 0; }
 void     hal_encoder_init(void) {}
+void     hal_encoder_take(encoder_channel_t c, encoder_sample_t *out) {
+    (void)c;
+    out->period_us = 0; out->last_pulse_us = 0; out->pulses = 0; out->has_period = 0;
+}
+uint16_t hal_encoder_glitch_count(encoder_channel_t c) { (void)c; return 0; }
+uint32_t hal_system_micros(void) { return mock_millis_value * 1000UL; }
 
 static uint8_t mock_nvm[1024];
 void hal_nvm_read(uint16_t a, uint8_t *b, uint16_t l) {

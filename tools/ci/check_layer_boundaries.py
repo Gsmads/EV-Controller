@@ -145,8 +145,9 @@ FUNCTION_EXCEPTIONS = {
     (PLATFORM_FILE, "pinMode"): 3,           # hal_gpio_mode, строки 41-43
     (PLATFORM_FILE, "digitalWrite"): 1,      # hal_gpio_write, строка 49
     (PLATFORM_FILE, "digitalRead"): 1,       # hal_gpio_read, строка 54
-    (PLATFORM_FILE, "millis"): 1,            # hal_system_millis, строка 289
-    (PLATFORM_FILE, "delayMicroseconds"): 1, # hal_system_delay_us, строка 294
+    (PLATFORM_FILE, "millis"): 1,            # hal_system_millis
+    (PLATFORM_FILE, "micros"): 1,            # hal_system_micros (ADR-0023)
+    (PLATFORM_FILE, "delayMicroseconds"): 1, # hal_system_delay_us
 }
 FUNCTION_EXCEPTION_REASON = "ADR-0014; снимается с #32"
 

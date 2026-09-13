@@ -55,7 +55,7 @@ firmware/
 ├── svc_pedals.h/.cpp              ← Педали с layered model (физ+UART)
 ├── svc_ramp.h/.cpp                ← Рампа разгона/торможения
 ├── svc_motor.h/.cpp               ← Координация моторов, масштабирование PWM
-├── svc_speed.h/.cpp               ← Скорость колёс из энкодеров (MVP-2+)
+├── svc_speed.h/.cpp               ← Скорость колёс по периоду импульсов (MVP-2+)
 ├── app_main.h/.cpp                ← Кооперативный планировщик
 ├── app_protocol.h/.cpp            ← Бинарный протокол UART/RS485
 ├── app_debug.h/.cpp               ← Текстовая телеметрия
@@ -80,7 +80,7 @@ firmware/
   **layered physical+uart с настраиваемым комбинатором** + watchdog UART-педалей
 - **svc_ramp**: плавный разгон/торможение с целочисленным аккумулятором
 - **svc_motor**: масштабирование 0-1023 → текущий TOP таймера, два канала PWM
-- **svc_speed**: RPM + км/ч от энкодеров, одометр (заработает с подключёнными датчиками)
+- **svc_speed**: RPM + км/ч по времени между импульсами (ADR-0023), одометр по их количеству
 
 ### 4.3 Приложение
 - **app_main**: кооперативный планировщик задач без delay()
@@ -148,7 +148,7 @@ svc_motor_set_pwm(pwm);
 
 | Параметр | Где | Значение | Как определить |
 |----------|-----|----------|----------------|
-| `ENCODER_PULSES_PER_REV` | cfg_board.h | 12 | Подключить датчик, прокрутить колесо вручную ровно на 1 оборот, посчитать импульсы. Можно через `hal_encoder_get_count` и серийный вывод |
+| `ENCODER_PULSES_PER_REV` | cfg_board.h | 12 | Подключить датчик, прокрутить колесо вручную ровно на 1 оборот, посчитать импульсы. Можно через поле `pulses` из `hal_encoder_take()` и серийный вывод |
 | `WHEEL_DIAMETER_MM` | cfg_board.h | 200 | Замерить рулеткой |
 | `PEDAL_GAS_RAW_MIN/MAX` | settings (defaults в cfg_settings.cpp) | 10/1000 | Замерить АЦП при отпущенной и нажатой педали. Веб-Settings (MVP-3) позволит подкрутить без перепрошивки |
 | `PEDAL_BRAKE_RAW_MIN/MAX` | то же | то же | то же |
@@ -163,13 +163,13 @@ svc_motor_set_pwm(pwm);
 cd tests
 make run
 ```
-Сейчас 314 тестов: util_math (33), cfg_settings (65), svc_ramp (39),
-util_ring (48), svc_speed (18), svc_pedals (54), cfg_params (37),
+Сейчас 357 тестов: util_math (33), cfg_settings (65), svc_ramp (39),
+util_ring (48), svc_speed (61), svc_pedals (54), cfg_params (37),
 app_protocol (20).
 
 ### Тесты, которые нужно добавить
 - [x] `test_svc_pedals.c` — combinator во всех пяти режимах, watchdog UART
-- [x] `test_svc_speed.c` — расчёт RPM/км/ч с известными импульсами на оборот
+- [x] `test_svc_speed.c` — расчёт RPM/км/ч от периода, эталонные точки от физики
 - [x] `test_app_protocol.c` — парсер пакетов (валидный/битый CRC/частичный пакет/мусор)
 - [x] `test_svc_pedals.c` — отклик при разных кривых, мёртвая зона, пересчёт в ШИМ
 - [x] `test_svc_ramp.cpp` — аккумулятор, интерполяция тормоза, failsafe, границы

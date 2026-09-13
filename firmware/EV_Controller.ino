@@ -47,7 +47,9 @@
 
 #define CONTROL_FREQ_HZ     100
 #define CONTROL_INTERVAL_MS 10
-#define SPEED_FREQ_HZ       10
+/* Частоты вызова у скорости больше нет: по ADR-0023 измерение опирается
+   на метки времени импульсов, а не на интервал между вызовами. Такт
+   задаёт только свежесть телеметрии. */
 #define SPEED_INTERVAL_MS   100
 #define DEBUG_INTERVAL_MS   200
 
@@ -87,7 +89,7 @@ static void task_control(void)
 static void task_speed_telemetry(void)
 {
     /* 1. Обновить расчёт скорости из энкодеров */
-    svc_speed_update(SPEED_FREQ_HZ);
+    svc_speed_update();
 
     /* 2. Собрать пакет телеметрии (v2 — расширенный) */
     telemetry_packet_t t;
