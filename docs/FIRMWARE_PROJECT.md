@@ -163,7 +163,7 @@ svc_motor_set_pwm(pwm);
 cd tests
 make run
 ```
-Сейчас 263 теста: util_math (33), cfg_settings (65), svc_ramp (10),
+Сейчас 292 теста: util_math (33), cfg_settings (65), svc_ramp (39),
 util_ring (48), svc_speed (18), svc_pedals (32), cfg_params (37),
 app_protocol (20).
 
@@ -172,7 +172,7 @@ app_protocol (20).
 - [x] `test_svc_speed.c` — расчёт RPM/км/ч с известными импульсами на оборот
 - [x] `test_app_protocol.c` — парсер пакетов (валидный/битый CRC/частичный пакет/мусор)
 - [ ] `test_svc_pedals.c` — отклик при разных кривых (linear/quadratic/cubic) не покрыт
-- [ ] `test_svc_ramp.cpp` — тормозная ветка и границы покрыты частично
+- [x] `test_svc_ramp.cpp` — аккумулятор, интерполяция тормоза, failsafe, границы
 
 ### Тестирование на железе
 - Серийный монитор @ 9600 бод покажет debug-телеметрию каждые 200мс

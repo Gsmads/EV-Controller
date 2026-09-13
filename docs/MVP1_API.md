@@ -158,7 +158,7 @@ app_scheduler_run();
 
 ## Тестирование
 
-### Десктопные тесты (263 теста)
+### Десктопные тесты (292 теста)
 
 ```bash
 cd tests
@@ -171,7 +171,7 @@ g++ -std=c++11 -I.. -o test_util_math test_util_math.c ../util_math.cpp
 g++ -std=c++11 -I.. -o test_cfg_settings test_cfg_settings.c ../cfg_settings.cpp ../util_crc.cpp
 ./test_cfg_settings
 
-# svc_ramp: 10 тестов (eco/sport accel, profile switch, brake, reset)
+# svc_ramp: 39 тестов (рампа, аккумулятор, интерполяция тормоза, failsafe)
 g++ -std=c++11 -I.. -o test_svc_ramp test_svc_ramp.cpp ../svc_ramp.cpp ../util_math.cpp
 ./test_svc_ramp
 ```
