@@ -94,7 +94,7 @@ Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_s
 ## 4. Сборка, тесты, проверки
 
 ```bash
-cd tests && make run       # 71 тест, ~5 секунд, должно быть 0 failed
+cd tests && make run       # 119 тестов, ~5 секунд, должно быть 0 failed
 cd tests && make clean     # убрать бинарники перед коммитом
 ```
 
