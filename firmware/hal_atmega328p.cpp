@@ -74,18 +74,32 @@ void hal_adc_init(void)
     while (ADCSRA & (1 << ADSC)) {}
 }
 
+static uint16_t adc_bad_channel = 0;
+
+uint16_t hal_adc_bad_channel_count(void)
+{
+    return adc_bad_channel;
+}
+
 uint16_t hal_adc_read(uint8_t channel)
 {
     /*
-     * Каналы 0–7 на ATmega328P:
-     *   0–5 → A0–A5 (обычные)
-     *   6–7 → A6–A7 (только аналоговые, нет digital)
+     * Каналы 0–7 на ATmega328P: 0–5 выведены и как цифровые, 6–7 только
+     * аналоговые. ADMUX принимает номер канала, и только его.
      *
-     * Для Arduino pin mapping: A0=14, A1=15, ..., A6=20, A7=21
-     * Но ADMUX принимает номер канала 0–7
+     * Здесь раньше стояло «if (channel >= 14) channel -= 14;» — попытка
+     * принять заодно нумерацию выводов Arduino, где A0 = 14. Функция
+     * угадывала, что ей передали, по величине числа. Следом шло
+     * «channel &= 0x07», превращавшее любое лишнее значение в валидный
+     * канал молча: 9 читалось как канал 1. Обе строки убраны вместе
+     * с переездом карты каналов в настройки (ADR-0009).
      */
-    if (channel >= 14) channel -= 14;  /* Arduino pin → ADC channel */
-    channel &= 0x07;
+    if (channel >= ADC_CHANNEL_COUNT) {
+        if (adc_bad_channel != 0xFFFF) {
+            adc_bad_channel++;
+        }
+        return 0;   /* безопасное значение; обоснование в hal_adc.h */
+    }
 
     /* Выбор канала, сохраняя REFS */
     ADMUX = (ADMUX & 0xF0) | channel;

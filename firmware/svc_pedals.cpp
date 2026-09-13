@@ -104,8 +104,12 @@ static void apply_watchdog(pedal_t *p, uint32_t now, uint16_t timeout_ms)
 
 void svc_pedals_init(void)
 {
-    gas.adc_channel = PIN_PEDAL_GAS;
-    brake.adc_channel = PIN_PEDAL_BRAKE;
+    /* Каналы АЦП берутся из настроек, а не из cfg_board.h: ADR-0009.
+       Настройки к этому моменту уже загружены и проверены — карта каналов
+       валидируется в cfg_settings_init(). */
+    const settings_t *cfg = cfg_settings_get();
+    gas.adc_channel   = cfg->adc_ch_pedal_gas;
+    brake.adc_channel = cfg->adc_ch_pedal_brake;
 
     gas.raw = 0;
     brake.raw = 0;
