@@ -158,7 +158,7 @@ app_scheduler_run();
 
 ## Тестирование
 
-### Десктопные тесты (248 тестов)
+### Десктопные тесты (263 теста)
 
 ```bash
 cd tests
@@ -167,7 +167,7 @@ cd tests
 g++ -std=c++11 -I.. -o test_util_math test_util_math.c ../util_math.cpp
 ./test_util_math
 
-# cfg_settings: 28 тестов (defaults, save/load, CRC corruption, profiles)
+# cfg_settings: 65 тестов (defaults, save/load, CRC corruption, profiles, миграции)
 g++ -std=c++11 -I.. -o test_cfg_settings test_cfg_settings.c ../cfg_settings.cpp ../util_crc.cpp
 ./test_cfg_settings
 

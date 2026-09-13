@@ -157,6 +157,135 @@ void test_release_uart(void) {
     ASSERT_EQ(0, svc_pedals_get_brake_uart(), "и тормоз");
 }
 
+
+/* ====================================================================
+ *  ADR-0004: все пять комбинаторов
+ *
+ *  Комбинатор решает, как складываются педаль ребёнка и команда родителя.
+ *  Это ядро слоистой модели, и до сих пор проверялось только умолчание.
+ * ==================================================================== */
+
+/** Довести физическую педаль до заданного сырого значения и дать фильтру сойтись. */
+static void settle_physical_gas(uint16_t raw) {
+    signal_value[ANALOG_PEDAL_GAS] = raw;
+    for (int i = 0; i < 400; i++) svc_pedals_update();
+}
+
+static void set_gas_combinator(uint8_t mode) {
+    cfg_settings_get_mutable()->gas_combinator = mode;
+}
+
+void test_combine_max(void) {
+    printf("--- test_combine_max ---\n");
+    setup_clean();
+    set_gas_combinator(PEDAL_COMBINE_MAX);
+    settle_physical_gas(1000);                 /* физическая почти в полу */
+    uint16_t physical = svc_pedals_get_gas_physical();
+
+    svc_pedals_set_uart_gas(200);
+    svc_pedals_update();
+    ASSERT_EQ(physical, svc_pedals_get_gas(),
+              "MAX: побеждает большее — ребёнок жмёт сильнее родителя");
+
+    svc_pedals_set_uart_gas(1023);
+    svc_pedals_update();
+    ASSERT_EQ(1023, svc_pedals_get_gas(), "MAX: теперь больше команда родителя");
+}
+
+void test_combine_additive_clamp(void) {
+    printf("--- test_combine_additive_clamp ---\n");
+    setup_clean();
+    set_gas_combinator(PEDAL_COMBINE_ADDITIVE_CLAMP);
+    settle_physical_gas(10);                   /* физическая отпущена */
+    svc_pedals_set_uart_gas(300);
+    svc_pedals_update();
+    ASSERT_EQ(300, svc_pedals_get_gas(), "ADDITIVE: отпущенная педаль плюс 300 = 300");
+
+    settle_physical_gas(1000);
+    uint16_t physical = svc_pedals_get_gas_physical();
+    svc_pedals_set_uart_gas(1023);
+    svc_pedals_update();
+    ASSERT_EQ(1023, svc_pedals_get_gas(),
+              "ADDITIVE: сумма ограничена 1023, а не переполняется");
+    ASSERT_EQ(1, physical + 1023 > 1023, "проверка условия: сумма действительно больше предела");
+}
+
+void test_combine_uart_priority(void) {
+    printf("--- test_combine_uart_priority ---\n");
+    setup_clean();
+    set_gas_combinator(PEDAL_COMBINE_UART_PRIORITY);
+    settle_physical_gas(1000);
+    uint16_t physical = svc_pedals_get_gas_physical();
+
+    svc_pedals_set_uart_gas(0);
+    svc_pedals_update();
+    ASSERT_EQ(physical, svc_pedals_get_gas(),
+              "UART_PRIORITY: нулевая команда не перебивает — действует педаль");
+
+    svc_pedals_set_uart_gas(100);
+    svc_pedals_update();
+    ASSERT_EQ(100, svc_pedals_get_gas(),
+              "UART_PRIORITY: ненулевая команда перебивает даже большую педаль");
+}
+
+void test_combine_physical_only(void) {
+    printf("--- test_combine_physical_only ---\n");
+    setup_clean();
+    set_gas_combinator(PEDAL_COMBINE_PHYSICAL_ONLY);
+    settle_physical_gas(1000);
+    uint16_t physical = svc_pedals_get_gas_physical();
+
+    svc_pedals_set_uart_gas(1023);
+    svc_pedals_update();
+    ASSERT_EQ(physical, svc_pedals_get_gas(),
+              "PHYSICAL_ONLY: команда по UART не действует вовсе");
+    ASSERT_EQ(1023, svc_pedals_get_gas_uart(),
+              "но принята и видна в телеметрии — отказ не молчаливый");
+}
+
+void test_combine_uart_only(void) {
+    printf("--- test_combine_uart_only ---\n");
+    setup_clean();
+    set_gas_combinator(PEDAL_COMBINE_UART_ONLY);
+    settle_physical_gas(1000);
+    ASSERT_EQ(1, svc_pedals_get_gas_physical() > 0, "физическая педаль нажата");
+
+    svc_pedals_set_uart_gas(0);
+    svc_pedals_update();
+    ASSERT_EQ(0, svc_pedals_get_gas(),
+              "UART_ONLY: педаль ребёнка не действует — это режим полного перехвата");
+
+    svc_pedals_set_uart_gas(400);
+    svc_pedals_update();
+    ASSERT_EQ(400, svc_pedals_get_gas(), "UART_ONLY: действует только команда");
+}
+
+void test_unknown_combinator_falls_back_to_max(void) {
+    printf("--- test_unknown_combinator_falls_back_to_max ---\n");
+    setup_clean();
+    set_gas_combinator(200);                   /* значения не существует */
+    settle_physical_gas(1000);
+    uint16_t physical = svc_pedals_get_gas_physical();
+    svc_pedals_set_uart_gas(100);
+    svc_pedals_update();
+    ASSERT_EQ(physical, svc_pedals_get_gas(),
+              "неизвестный комбинатор ведёт себя как MAX — педаль ребёнка не теряется");
+}
+
+void test_brake_combinator_default_is_max(void) {
+    printf("--- test_brake_combinator_default_is_max ---\n");
+    setup_clean();
+    ASSERT_EQ(PEDAL_COMBINE_MAX, cfg_settings_get()->brake_combinator,
+              "умолчание тормоза — MAX: тормозит тот, кто жмёт сильнее");
+    signal_value[ANALOG_PEDAL_BRAKE] = 1000;
+    for (int i = 0; i < 400; i++) svc_pedals_update();
+    uint16_t physical = svc_pedals_get_brake_physical();
+    svc_pedals_set_uart_brake(10);
+    svc_pedals_update();
+    ASSERT_EQ(physical, svc_pedals_get_brake(),
+              "слабая команда родителя не ослабляет тормоз ребёнка");
+}
+
 int main(void) {
     printf("=========================================\n");
     printf("  svc_pedals Unit Tests\n");
@@ -169,6 +298,13 @@ int main(void) {
     test_uart_pedal_adds_to_physical();
     test_uart_watchdog_releases_virtual_pedal();
     test_release_uart();
+    test_combine_max();
+    test_combine_additive_clamp();
+    test_combine_uart_priority();
+    test_combine_physical_only();
+    test_combine_uart_only();
+    test_unknown_combinator_falls_back_to_max();
+    test_brake_combinator_default_is_max();
 
     printf("\n=========================================\n");
     printf("  Results: %d passed, %d failed\n", pass, fail);
