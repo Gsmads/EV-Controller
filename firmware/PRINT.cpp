@@ -1,11 +1,12 @@
 #pragma once
 
 #include "Inc.h"
+#include "hal_uart.h"
 
 void printString(const char *s)
 {
   while (*s)
-    serial_write(*s++);
+    hal_uart_write(*s++);
 }
 
 
@@ -14,7 +15,7 @@ void printPgmString(const char *s)
 {
   char c;
   while ((c = pgm_read_byte_near(s++)))
-    serial_write(c);
+    hal_uart_write(c);
 }
 
 
@@ -24,7 +25,7 @@ void printPgmString(const char *s)
 // 	unsigned long i = 0;
 //
 // 	if (n == 0) {
-// 		serial_write('0');
+// 		hal_uart_write('0');
 // 		return;
 // 	}
 //
@@ -34,7 +35,7 @@ void printPgmString(const char *s)
 // 	}
 //
 // 	for (; i > 0; i--)
-// 		serial_write(buf[i - 1] < 10 ?
+// 		hal_uart_write(buf[i - 1] < 10 ?
 // 			'0' + buf[i - 1] :
 // 			'A' + buf[i - 1] - 10);
 // }
@@ -53,9 +54,9 @@ void print_uint8_base10(uint8_t n)
     digit_b = '0' + n % 10;
     n /= 10;
   }
-  serial_write('0' + n);
-  if (digit_b) { serial_write(digit_b); }
-  if (digit_a) { serial_write(digit_a); }
+  hal_uart_write('0' + n);
+  if (digit_b) { hal_uart_write(digit_b); }
+  if (digit_a) { hal_uart_write(digit_a); }
 }
 
 
@@ -70,14 +71,14 @@ void print_uint8_base2_ndigit(uint8_t n, uint8_t digits) {
   }
 
   for (; i > 0; i--)
-      serial_write('0' + buf[i - 1]);
+      hal_uart_write('0' + buf[i - 1]);
 }
 
 
 void print_uint32_base10(uint32_t n)
 {
   if (n == 0) {
-    serial_write('0');
+    hal_uart_write('0');
     return;
   }
 
@@ -90,14 +91,14 @@ void print_uint32_base10(uint32_t n)
   }
 
   for (; i > 0; i--)
-    serial_write('0' + buf[i-1]);
+    hal_uart_write('0' + buf[i-1]);
 }
 
 
 void printInteger(long n)
 {
   if (n < 0) {
-    serial_write('-');
+    hal_uart_write('-');
     print_uint32_base10(-n);
   } else {
     print_uint32_base10(n);
@@ -113,7 +114,7 @@ void printInteger(long n)
 void printFloat(float n, uint8_t decimal_places)
 {
   if (n < 0) {
-    serial_write('-');
+    hal_uart_write('-');
     n = -n;
   }
 
@@ -142,8 +143,8 @@ void printFloat(float n, uint8_t decimal_places)
 
   // Print the generated string.
   for (; i > 0; i--) {
-    if (i == decimal_places) { serial_write('.'); } // Insert decimal point in right place.
-    serial_write(buf[i-1]);
+    if (i == decimal_places) { hal_uart_write('.'); } // Insert decimal point in right place.
+    hal_uart_write(buf[i-1]);
   }
 }
 

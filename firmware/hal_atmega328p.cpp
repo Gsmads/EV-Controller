@@ -11,7 +11,7 @@
  * - hal_pwm:     Timer1 Phase-Correct/Fast PWM, произвольный TOP
  * - hal_system:  millis (через Arduino core Timer2), watchdog, IRQ
  * - hal_eeprom:  avr/eeprom.h обёртка
- * - hal_uart:    обёртка над MICRO_UART + RS485 DE/RE
+ * - hal_uart:    регистры USART0 + кольца util_ring + RS485 DE/RE
  *
  * @version 1.0.0 (MVP-1)
  */
@@ -29,7 +29,7 @@
 #include "hal_system.h"
 #include "hal_eeprom.h"
 #include "hal_uart.h"
-#include "MICRO_UART.h"
+#include "util_ring.h"
 
 /* ====================================================================
  *  hal_gpio
@@ -358,44 +358,120 @@ void hal_eeprom_write_byte(uint16_t addr, uint8_t data)
 }
 
 /* ====================================================================
- *  hal_uart — обёртка над MICRO_UART + RS485
+ *  hal_uart — USART0 на кольцах util_ring + RS485
+ *
+ *  Переносимая часть (индексы, заполненность, отбрасывание блока целиком)
+ *  живёт в util_ring и проверяется десктопными тестами. Здесь остаётся то,
+ *  что можно проверить только на железе: регистры, делитель и прерывания.
+ *  Решение ADR-0018.
  * ==================================================================== */
+
+static uint8_t     uart_rx_storage[RX_BUFFER_SIZE + 1];
+static uint8_t     uart_tx_storage[TX_BUFFER_SIZE + 1];
+static util_ring_t uart_rx;
+static util_ring_t uart_tx;
+
+static hal_uart_tx_policy_t uart_tx_policy = HAL_UART_TX_DROP_PACKET;
 
 void hal_uart_init(uint32_t baud)
 {
-    (void)baud;  /* MICRO_UART использует BAUD_RATE из своего .h */
-    serial_init();
+    util_ring_init(&uart_rx, uart_rx_storage, (uint8_t)(RX_BUFFER_SIZE + 1));
+    util_ring_init(&uart_tx, uart_tx_storage, (uint8_t)(TX_BUFFER_SIZE + 1));
+
+    /* Удвоитель включён всегда: на 16 МГц он даёт точный делитель для 250000
+       (UBRR=7, ошибка 0,00 %) и не портит низкие скорости — 9600 получает
+       UBRR=207 и ошибку +0,16 %. Прежний код выбирал режим директивой #if
+       по константе, то есть скорость нельзя было задать во время выполнения.
+       Округление до ближайшего, а не отбрасывание дробной части: при
+       отбрасывании 115200 давала бы делитель на единицу больше и ошибку
+       в полтора раза выше. Основание: ADR-0015. */
+    UCSR0A |= (1 << U2X0);
+    uint32_t divisor = 8UL * baud;
+    uint16_t ubrr = (uint16_t)(((F_CPU + divisor / 2) / divisor) - 1);
+    UBRR0H = (uint8_t)(ubrr >> 8);
+    UBRR0L = (uint8_t)ubrr;
+
+    /* Приём, передача, прерывание по завершении приёма. 8N1 — умолчание. */
+    UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);
 
     /* RS485: пин направления как выход, начальное состояние — приём */
     hal_gpio_mode(PIN_RS485_DE_RE, GPIO_OUTPUT);
     hal_gpio_write(PIN_RS485_DE_RE, GPIO_LOW);
 }
 
+void hal_uart_set_tx_policy(hal_uart_tx_policy_t policy)
+{
+    uart_tx_policy = policy;
+}
+
+uint16_t hal_uart_tx_dropped(void)
+{
+    return util_ring_dropped(&uart_tx);
+}
+
+uint8_t hal_uart_write_buf(const uint8_t *buf, uint8_t len)
+{
+    if (uart_tx_policy == HAL_UART_TX_BLOCK) {
+        /* Ожидание готовности регистра, а не delay(): время ограничено
+           скоростью линии. У передатчика нет управления потоком, поэтому
+           кольцо опустошается независимо ни от чего, и цикл конечен.
+           Границы посчитаны в ADR-0016: на 250000 один байт — 40 мкс,
+           кадр телеметрии в полностью занятое кольцо — 1,64 мс. */
+        for (uint8_t i = 0; i < len; i++) {
+            while (util_ring_free(&uart_tx) == 0) {
+                UCSR0B |= (1 << UDRIE0);   /* передача точно идёт */
+            }
+            util_ring_put(&uart_tx, buf[i]);
+            UCSR0B |= (1 << UDRIE0);
+        }
+        return 1;
+    }
+
+    if (!util_ring_put_all(&uart_tx, buf, len)) {
+        return 0;                          /* счётчик увеличен внутри */
+    }
+    UCSR0B |= (1 << UDRIE0);
+    return 1;
+}
+
 void hal_uart_write(uint8_t data)
 {
-    serial_write(data);
+    (void)hal_uart_write_buf(&data, 1);
 }
 
-void hal_uart_write_buf(const uint8_t *buf, uint8_t len)
+int16_t hal_uart_read(void)
 {
-    for (uint8_t i = 0; i < len; i++) {
-        serial_write(buf[i]);
-    }
-}
-
-uint8_t hal_uart_read(void)
-{
-    return serial_read();
+    return util_ring_get(&uart_rx);
 }
 
 uint8_t hal_uart_available(void)
 {
-    return serial_get_rx_buffer_count();
+    return util_ring_count(&uart_rx);
 }
 
 void hal_uart_flush_rx(void)
 {
-    serial_reset_read_buffer();
+    util_ring_reset(&uart_rx);
+}
+
+/** Приём байта. Переполнение кольца приёма молча теряет байт: кадр
+    всё равно не сойдётся по CRC, и парсер отбросит его сам. */
+ISR(USART_RX_vect)
+{
+    uint8_t data = UDR0;
+    (void)util_ring_put(&uart_rx, data);
+}
+
+/** Регистр передачи освободился. Выключаем прерывание, когда отдавать
+    больше нечего, иначе оно возникало бы непрерывно. */
+ISR(USART_UDRE_vect)
+{
+    int16_t b = util_ring_get(&uart_tx);
+    if (b < 0) {
+        UCSR0B &= ~(1 << UDRIE0);
+        return;
+    }
+    UDR0 = (uint8_t)b;
 }
 
 void hal_uart_set_rs485_tx(uint8_t tx_mode)

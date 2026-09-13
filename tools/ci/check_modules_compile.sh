@@ -46,9 +46,8 @@ FLAGS=(-std=c++11 -fsyntax-only -Ifirmware -Wall -Wextra)
 # перестанут быть таковыми вместе с задачей #31.
 declare -A PLATFORM_BOUND=(
     [hal_atmega328p.cpp]="платформенный по ADR-0001, собирается только AVR-тулчейном"
-    [MICRO_UART.cpp]="Arduino.h через MICRO_UART.h; снимается с #31"
     [PRINT.cpp]="Arduino.h через PRINT.h; снимается с #31"
-    [app_debug.cpp]="Arduino.h косвенно через MICRO_UART.h и PRINT.h; снимается с #31"
+    [app_debug.cpp]="Arduino.h косвенно через PRINT.h; снимается с #31"
 )
 
 # Модули, которые обязаны компилироваться, но сегодня не компилируются.

@@ -1,20 +1,95 @@
 /**
  * @file hal_uart.h
  * @brief HAL: последовательный порт с поддержкой RS485
- * Реализация: обёртка над MICRO_UART с добавлением RS485 DE/RE
+ *
+ * Реализация — hal_atmega328p.cpp (регистры, прерывания, делитель скорости)
+ * поверх переносимых колец util_ring. Решение ADR-0018.
  */
 #pragma once
 
 #include <stdint.h>
 
-#define HAL_UART_NO_DATA  0xFF
+/** Политика при нехватке места в буфере передачи (ADR-0016). */
+typedef enum {
+    HAL_UART_TX_DROP_PACKET = 0,  /**< Умолчание: блок не пишется целиком */
+    HAL_UART_TX_BLOCK       = 1   /**< Ждать освобождения, как в Grbl */
+} hal_uart_tx_policy_t;
 
-void    hal_uart_init(uint32_t baud);
-void    hal_uart_write(uint8_t data);
-void    hal_uart_write_buf(const uint8_t *buf, uint8_t len);
-uint8_t hal_uart_read(void);
+/**
+ * @brief Инициализация порта
+ * @param baud Скорость обмена, бод. Делитель считается во время выполнения
+ */
+void hal_uart_init(uint32_t baud);
+
+/**
+ * @brief Отправить один байт
+ *
+ * Отдельный байт — это блок длины 1, и к нему применяется та же политика,
+ * что и к кадру. Для отладочной печати это значит: при заполненном буфере
+ * символ теряется и учитывается счётчиком, а не затирает чужие данные.
+ *
+ * @param data Байт
+ */
+void hal_uart_write(uint8_t data);
+
+/**
+ * @brief Отправить блок целиком либо не отправить вовсе
+ *
+ * Место, где принимается решение об отбрасывании: длина кадра известна
+ * только здесь (ADR-0016). Усечённый кадр ушёл бы в линию валидным по
+ * длине, и мост не отличил бы его от помехи.
+ *
+ * @param buf Блок
+ * @param len Длина блока
+ * @return 1 — отправлен целиком, 0 — отвергнут целиком (только для
+ *         политики HAL_UART_TX_DROP_PACKET)
+ */
+uint8_t hal_uart_write_buf(const uint8_t *buf, uint8_t len);
+
+/**
+ * @brief Прочитать байт из буфера приёма
+ *
+ * Возвращает int16_t, а не uint8_t: признак "данных нет" не должен быть
+ * представим в данных. Прежний сентинел 0xFF (дефект B-2 docs/AUDIT.md)
+ * достался от Grbl, где по UART шёл ASCII.
+ *
+ * @return Байт 0…255, либо -1 если данных нет
+ */
+int16_t hal_uart_read(void);
+
+/**
+ * @brief Сколько байт лежит в буфере приёма
+ * @return Число байт
+ */
 uint8_t hal_uart_available(void);
-void    hal_uart_flush_rx(void);
 
-/** Управление направлением RS485 (HIGH=передача, LOW=приём) */
-void    hal_uart_set_rs485_tx(uint8_t tx_mode);
+/**
+ * @brief Очистить буфер приёма
+ */
+void hal_uart_flush_rx(void);
+
+/**
+ * @brief Выбрать политику при нехватке места в буфере передачи
+ *
+ * Временный вход: после появления поля в settings_t политика будет
+ * приходить оттуда (ADR-0016). Умолчание — HAL_UART_TX_DROP_PACKET.
+ *
+ * @param policy Политика
+ */
+void hal_uart_set_tx_policy(hal_uart_tx_policy_t policy);
+
+/**
+ * @brief Сколько блоков отвергнуто целиком с момента включения
+ *
+ * Уходит в телеметрию как uart_tx_dropped (ADR-0016): у отказа должно
+ * быть имя и счётчик (CONVENTIONS.md §10).
+ *
+ * @return Число отказов
+ */
+uint16_t hal_uart_tx_dropped(void);
+
+/**
+ * @brief Управление направлением RS485
+ * @param tx_mode 1 — передача, 0 — приём
+ */
+void hal_uart_set_rs485_tx(uint8_t tx_mode);

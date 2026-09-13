@@ -22,7 +22,7 @@
     [app_debug] ←──────────────────┘                │        D10 (OC1B)
          │                                          │
     [hal_uart] ──→ Serial (9600)                    │
-    MICRO_UART                              [app_scheduler]
+    hal_uart / util_ring                    [app_scheduler]
                                              10ms / 200ms
 ```
 
@@ -83,7 +83,7 @@
 
 | Файл | Описание |
 |------|----------|
-| `MICRO_UART.h/.cpp` | Прерывательный UART (Grbl) |
+| `util_ring.h/.cpp` | Кольцевой буфер UART, переносимый (ADR-0018) |
 | `PRINT.h/.cpp` | Форматирование чисел без sprintf |
 | `Inc.h` | Мастер-включений для PRINT.cpp |
 

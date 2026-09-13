@@ -77,7 +77,7 @@ make verbose     # Пересобрать с дополнительными пр
 ## Что НЕ покрыто
 
 - **HAL** — тестируется на железе (требует MCU)
-- **MICRO_UART, PRINT** — Arduino-специфичные
+- **PRINT** — Arduino-специфичный (`pgm_read_byte_near`)
 - **app_protocol** — может быть покрыт mock-UART тестами (TODO)
 - **svc_pedals** — тяжело без mock_hal_adc (TODO)
 - **svc_motor** — требует mock_hal_pwm (TODO)

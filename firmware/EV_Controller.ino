@@ -42,7 +42,6 @@
 #include "app_main.h"
 #include "app_debug.h"
 #include "app_protocol.h"
-#include "MICRO_UART.h"
 #include "PRINT.h"
 
 #define CONTROL_FREQ_HZ     100
@@ -149,7 +148,7 @@ static void task_debug(void)
 void setup()
 {
     hal_system_init();
-    hal_uart_init(UART_BAUD_DEBUG);
+    hal_uart_init(UART_BAUD_DEFAULT);
     hal_adc_init();
 
     cfg_settings_init();

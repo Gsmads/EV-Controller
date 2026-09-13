@@ -54,7 +54,6 @@ BASE = {
     "firmware/hal_atmega328p.cpp": HAL,
     "firmware/svc_ramp.cpp": RAMP,
     "firmware/svc_ramp.h": "#pragma once\nvoid svc_ramp_update(void);\n",
-    "firmware/MICRO_UART.h": '#pragma once\n#include "Arduino.h"\nvoid serial_init(void);\n',
     "firmware/PRINT.h": '#pragma once\n#include "Arduino.h"\nvoid printInteger(long n);\n',
     "tests/test_util_math.c": "#include <stdint.h>\nint main(void) { return 0; }\n",
 }
@@ -131,7 +130,7 @@ def main():
 
     # --- базовое поведение ------------------------------------------------
     case("чистое дерево — зелёный", CLEAN,
-         expect_text=("просмотрено", "исключение: firmware/MICRO_UART.h / Arduino.h"))
+         expect_text=("просмотрено", "исключение: firmware/PRINT.h / Arduino.h"))
     case("нарушение в комментарии не считается", CLEAN,
          {"firmware/svc_ramp.cpp": RAMP.replace(
              "void svc_ramp_update",
@@ -237,7 +236,7 @@ def main():
          expect_text=("допускает 1 вхождений millis, найдено 2",
                       "hal_atmega328p.cpp:10", "hal_atmega328p.cpp:12"))
     case("ATTACK исключение по заголовкам не пускает новый avr/wdt.h", VIOLATION,
-         {"firmware/MICRO_UART.h":
+         {"firmware/PRINT.h":
           '#pragma once\n#include "Arduino.h"\n#include <avr/wdt.h>\n'},
          expect_text=("avr/wdt.h",))
     case("неиспользованное исключение названо вслух", CLEAN,
