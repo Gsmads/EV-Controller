@@ -95,7 +95,7 @@ Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_s
 ## 4. Сборка, тесты, проверки
 
 ```bash
-cd tests && make run       # 408 тестов, ~5 секунд, должно быть 0 failed
+cd tests && make run       # 425 тестов, ~5 секунд, должно быть 0 failed
 cd tests && make clean     # убрать бинарники перед коммитом
 ```
 
@@ -180,8 +180,8 @@ cd tools/gui && pip install -r requirements.txt && python server.py
 
 | Параметр | Где | Текущее | Как получить |
 |---|---|---|---|
-| `ENCODER_PULSES_PER_REV` | `cfg_board.h` | 12 | прокрутить колесо ровно на оборот, посчитать импульсы |
-| `WHEEL_DIAMETER_MM` | `cfg_board.h` | 200 | замерить |
+| `ENCODER_PULSES_PER_REV` | настройки, умолчание в `cfg_board.h` | 12 | прокрутить колесо ровно на оборот, посчитать импульсы. По `HARDWARE_BRINGUP.md` ожидается 30–70. Меняется без перепрошивки |
+| `WHEEL_DIAMETER_MM` | настройки, умолчание в `cfg_board.h` | 200 | замерить. Меняется без перепрошивки |
 | `pedal_gas_min/max` | дефолты `cfg_settings.cpp` | 10 / 1000 | замерить АЦП в крайних положениях |
 | `motor_deadzone` | дефолты | 30 | найти минимальный ШИМ, при котором колесо трогается |
 | загрузчик Nano | — | неизвестен | от этого зависит, безопасно ли включать watchdog |

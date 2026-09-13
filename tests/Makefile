@@ -35,7 +35,7 @@ test_svc_ramp: test_svc_ramp.cpp $(FW)/svc_ramp.cpp $(FW)/util_math.cpp
 test_util_ring: test_util_ring.c $(FW)/util_ring.cpp
 	$(CXX) $(CXXFLAGS) -I$(FW) -o $@ $^
 
-test_svc_speed: test_svc_speed.c $(FW)/svc_speed.cpp
+test_svc_speed: test_svc_speed.c $(FW)/svc_speed.cpp $(FW)/cfg_settings.cpp $(FW)/cfg_params.cpp $(FW)/util_crc.cpp $(FW)/util_rom.cpp
 	$(CXX) $(CXXFLAGS) -I$(FW) -o $@ $^
 
 test_svc_pedals: test_svc_pedals.c $(FW)/svc_pedals.cpp $(FW)/cfg_settings.cpp $(FW)/cfg_params.cpp $(FW)/util_crc.cpp $(FW)/util_math.cpp $(FW)/util_rom.cpp

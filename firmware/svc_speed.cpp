@@ -49,15 +49,16 @@
 #include "hal_encoder.h"
 #include "hal_system.h"
 #include "cfg_board.h"
+#include "cfg_settings.h"
 
-/* Числитель D × 1 131 000 обязан помещаться в uint32 вместе с половиной
- * знаменателя. 4 294 967 295 / 1 131 000 = 3797, поэтому диаметр больше
- * 3700 мм ломает расчёт молча. Пусть лучше не соберётся. */
-#if WHEEL_DIAMETER_MM > 3700
-#error "WHEEL_DIAMETER_MM слишком велик: числитель расчёта скорости переполнит uint32"
+/* Умолчания обязаны укладываться в те же границы, что и значения из
+ * настроек. Вывод границ - в cfg_board.h; проверка здесь ловит правку
+ * умолчания, сделанную мимо реестра параметров. */
+#if WHEEL_DIAMETER_MM > WHEEL_DIAMETER_MM_MAX || WHEEL_DIAMETER_MM < 1
+#error "WHEEL_DIAMETER_MM вне границ: числитель расчёта скорости переполнит uint32"
 #endif
-#if ENCODER_PULSES_PER_REV < 1
-#error "ENCODER_PULSES_PER_REV должен быть не меньше 1: иначе деление на ноль"
+#if ENCODER_PULSES_PER_REV > ENCODER_PPR_MAX || ENCODER_PULSES_PER_REV < 1
+#error "ENCODER_PULSES_PER_REV вне границ: ноль даёт деление на ноль, потолок - переполнение"
 #endif
 
 /* ====================================================================
@@ -86,11 +87,26 @@ static encoder_channel_t channel_of(speed_wheel_t w)
     return (w == SPEED_WHEEL_LEFT) ? ENCODER_LEFT : ENCODER_RIGHT;
 }
 
+/** Импульсов на оборот из настроек. Ноль невозможен по реестру
+ *  параметров, но деление на него было бы молчаливой катастрофой. */
+static uint32_t pulses_per_rev(void)
+{
+    uint16_t v = cfg_settings_get()->encoder_pulses_per_rev;
+    return (v == 0) ? (uint32_t)ENCODER_PULSES_PER_REV : (uint32_t)v;
+}
+
+/** Диаметр колеса из настроек. */
+static uint32_t wheel_diameter_mm(void)
+{
+    uint16_t v = cfg_settings_get()->wheel_diameter_mm;
+    return (v == 0) ? (uint32_t)WHEEL_DIAMETER_MM : (uint32_t)v;
+}
+
 /** Путь на один импульс в тысячных миллиметра: π·D·1000 / ppr */
 static uint32_t mm_per_pulse_x1000(void)
 {
     /* 31416 / 10000 = π с точностью +0,0026 % */
-    return (31416UL * (uint32_t)WHEEL_DIAMETER_MM) / (10UL * (uint32_t)ENCODER_PULSES_PER_REV);
+    return (31416UL * wheel_diameter_mm()) / (10UL * pulses_per_rev());
 }
 
 /* ====================================================================
@@ -150,10 +166,10 @@ void svc_speed_update(void)
             continue;
         }
 
-        uint32_t denom = period * (uint32_t)ENCODER_PULSES_PER_REV;
+        uint32_t denom = period * pulses_per_rev();
 
         uint32_t rpm32 = (60000000UL + denom / 2) / denom;
-        uint32_t kmh32 = ((uint32_t)WHEEL_DIAMETER_MM * 1131000UL + denom / 2) / denom;
+        uint32_t kmh32 = (wheel_diameter_mm() * 1131000UL + denom / 2) / denom;
 
         /* Насыщение вместо усечения — это дефект T-3 в новом обличье.
          * Фильтр дребезга пропускает период от ENCODER_MIN_PERIOD_US, то есть

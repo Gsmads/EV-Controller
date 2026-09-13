@@ -28,7 +28,7 @@
  * ==================================================================== */
 
 #define SETTINGS_MAGIC          0x4556  /* "EV" */
-#define SETTINGS_VERSION        4       /* v4: каналы АЦП в настройках (ADR-0009) */
+#define SETTINGS_VERSION        5       /* v5: геометрия колеса и энкодера (ADR-0023) */
 
 /** Размеры settings_t прошлых версий — для миграции.
  *
@@ -39,6 +39,7 @@
  */
 #define SETTINGS_SIZE_V2        182     /* слоистые педали */
 #define SETTINGS_SIZE_V3        186     /* + параметры UART */
+#define SETTINGS_SIZE_V4        191     /* + каналы АЦП */
 
 #define SETTINGS_EEPROM_OFFSET  0       /* Начальный адрес в EEPROM */
 
@@ -187,6 +188,15 @@ typedef struct __attribute__((packed)) {
     uint8_t  adc_ch_current_right;
     uint8_t  adc_ch_current_left;
     uint8_t  adc_ch_steering_pos;
+
+    /* --- Геометрия колеса и энкодера (v5), ADR-0023 ---
+       Обе величины задают масштаб расчёта скорости и одометра: формула
+       точна, но переводит период в километры в час именно через них.
+       Обе определяются только замером на конкретной машине (CLAUDE.md §8),
+       а замер — это подбор. В настройках они подбираются без перепрошивки
+       (ADR-0017). Умолчания берутся из cfg_board.h. */
+    uint16_t encoder_pulses_per_rev;
+    uint16_t wheel_diameter_mm;
 
 } settings_t;
 

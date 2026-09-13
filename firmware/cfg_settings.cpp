@@ -6,6 +6,7 @@
  * Полностью платформонезависимый, кроме вызовов HAL.
  */
 #include "cfg_settings.h"
+#include "cfg_board.h"
 #include "cfg_params.h"
 #include "hal_nvm.h"
 #include "util_crc.h"
@@ -201,6 +202,13 @@ static void fill_defaults(settings_t *s)
     s->adc_ch_current_right  = 2;
     s->adc_ch_steering_pos   = 3;
     s->adc_ch_current_left   = 6;
+
+    /* --- Геометрия колеса и энкодера (ADR-0023) ---
+       Умолчания из cfg_board.h. Оба значения выдуманы и подлежат замеру
+       на машине (CLAUDE.md §8): по docs/HARDWARE_BRINGUP.md импульсов на
+       оборот ожидается скорее 30-70, чем 12. */
+    s->encoder_pulses_per_rev = ENCODER_PULSES_PER_REV;
+    s->wheel_diameter_mm      = WHEEL_DIAMETER_MM;
 }
 
 uint8_t cfg_settings_validate_adc(const settings_t *s)
@@ -286,6 +294,7 @@ static uint16_t size_of_version(uint8_t version)
     switch (version) {
         case 2: return SETTINGS_SIZE_V2;
         case 3: return SETTINGS_SIZE_V3;
+        case 4: return SETTINGS_SIZE_V4;
         case SETTINGS_VERSION: return sizeof(settings_t);
         default: return 0;
     }

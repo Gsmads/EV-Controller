@@ -110,6 +110,15 @@ static const param_desc_t UTIL_ROM scalar_params[] = {
     { 0x0A03, S(adc_ch_current_right), PARAM_U8, PARAM_FLAG_NONE, 0, ADC_CHANNEL_COUNT - 1 },
     { 0x0A04, S(adc_ch_current_left),  PARAM_U8, PARAM_FLAG_NONE, 0, ADC_CHANNEL_COUNT - 1 },
     { 0x0A05, S(adc_ch_steering_pos),  PARAM_U8, PARAM_FLAG_NONE, 0, ADC_CHANNEL_COUNT - 1 },
+
+    /* --- Геометрия колеса и энкодера (ADR-0023) ---
+       Нижняя граница 1: ноль импульсов на оборот — деление на ноль, нулевой
+       диаметр — машина, которая едет и всегда показывает ноль. Верхние
+       границы выведены в cfg_board.h из разрядности расчёта, а не выбраны
+       по вкусу; физического смысла в них нет, и они сузятся после замеров
+       на машине. */
+    { 0x0B01, S(encoder_pulses_per_rev), PARAM_U16, PARAM_FLAG_TYPE_MAX, 1, ENCODER_PPR_MAX },
+    { 0x0B02, S(wheel_diameter_mm),      PARAM_U16, PARAM_FLAG_TYPE_MAX, 1, WHEEL_DIAMETER_MM_MAX },
 };
 
 #define SCALAR_PARAM_COUNT ((uint8_t)(sizeof(scalar_params) / sizeof(scalar_params[0])))
