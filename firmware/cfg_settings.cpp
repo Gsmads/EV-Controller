@@ -2,11 +2,11 @@
  * @file cfg_settings.c
  * @brief Реализация менеджера настроек
  *
- * Взаимодействует с EEPROM через HAL (hal_eeprom.h).
+ * Взаимодействует с EEPROM через HAL (hal_nvm.h).
  * Полностью платформонезависимый, кроме вызовов HAL.
  */
 #include "cfg_settings.h"
-#include "hal_eeprom.h"
+#include "hal_nvm.h"
 #include "util_crc.h"
 #include "svc_pedals.h"  /* For pedal_combinator_t enum */
 
@@ -327,13 +327,13 @@ static uint8_t migrate_from(uint8_t version)
     crc = util_crc16_update(crc, 0);
 
     for (uint16_t i = 0; i < old_size; i++) {
-        uint8_t b = hal_eeprom_read_byte((uint16_t)(EEPROM_DATA_OFFSET + i));
+        uint8_t b = hal_nvm_read_byte((uint16_t)(EEPROM_DATA_OFFSET + i));
         crc = util_crc16_update(crc, b);
         dst[i] = b;
     }
 
     uint8_t crc_buf[2];
-    hal_eeprom_read((uint16_t)(EEPROM_DATA_OFFSET + old_size), crc_buf, 2);
+    hal_nvm_read((uint16_t)(EEPROM_DATA_OFFSET + old_size), crc_buf, 2);
     uint16_t stored_crc = (uint16_t)crc_buf[0] | ((uint16_t)crc_buf[1] << 8);
 
     if (crc != stored_crc) {
@@ -349,7 +349,7 @@ void cfg_settings_init(void)
 
     /* 1. Читаем заголовок */
     eeprom_header_t header;
-    hal_eeprom_read(SETTINGS_EEPROM_OFFSET,
+    hal_nvm_read(SETTINGS_EEPROM_OFFSET,
                     (uint8_t *)&header, sizeof(header));
 
     /* 2. Проверяем magic */
@@ -371,12 +371,12 @@ void cfg_settings_init(void)
     }
 
     /* 4. Читаем данные */
-    hal_eeprom_read(EEPROM_DATA_OFFSET,
+    hal_nvm_read(EEPROM_DATA_OFFSET,
                     (uint8_t *)&current_settings, sizeof(settings_t));
 
     /* 5. Читаем сохранённый CRC */
     uint8_t crc_buf[2];
-    hal_eeprom_read(EEPROM_CRC_OFFSET, crc_buf, 2);
+    hal_nvm_read(EEPROM_CRC_OFFSET, crc_buf, 2);
     uint16_t stored_crc = (uint16_t)crc_buf[0] | ((uint16_t)crc_buf[1] << 8);
 
     /* 6. Проверяем CRC */
@@ -405,17 +405,17 @@ void cfg_settings_save(void)
     header.magic    = SETTINGS_MAGIC;
     header.version  = SETTINGS_VERSION;
     header.reserved = 0;
-    hal_eeprom_write(SETTINGS_EEPROM_OFFSET,
+    hal_nvm_write(SETTINGS_EEPROM_OFFSET,
                      (const uint8_t *)&header, sizeof(header));
 
     /* 2. Записываем данные */
-    hal_eeprom_write(EEPROM_DATA_OFFSET,
+    hal_nvm_write(EEPROM_DATA_OFFSET,
                      (const uint8_t *)&current_settings, sizeof(settings_t));
 
     /* 3. Вычисляем и записываем CRC */
     uint16_t crc = compute_crc(&current_settings);
     uint8_t crc_buf[2] = { (uint8_t)(crc & 0xFF), (uint8_t)(crc >> 8) };
-    hal_eeprom_write(EEPROM_CRC_OFFSET, crc_buf, 2);
+    hal_nvm_write(EEPROM_CRC_OFFSET, crc_buf, 2);
 }
 
 void cfg_settings_reset_defaults(void)

@@ -53,7 +53,7 @@ Services      svc_pedals, svc_ramp, svc_motor, svc_speed
      ↓
 Drivers       drv_* (пока пусто, появятся в MVP-3)
      ↓
-HAL           hal_gpio, hal_adc, hal_pwm, hal_uart, hal_eeprom,
+HAL           hal_gpio, hal_adc, hal_pwm, hal_uart, hal_nvm,
               hal_encoder, hal_system, hal_spi, hal_i2c
      ↓
 Hardware      ATmega328P

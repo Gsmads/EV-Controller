@@ -10,7 +10,8 @@
  * - hal_adc:     10-бит АЦП через регистры ADMUX/ADCSRA
  * - hal_pwm:     Timer1 Phase-Correct/Fast PWM, произвольный TOP
  * - hal_system:  millis (через Arduino core Timer2), watchdog, IRQ
- * - hal_eeprom:  avr/eeprom.h обёртка
+ * - hal_nvm:     долговременная память, на этой платформе avr/eeprom.h
+ * - util_rom:    чтение постоянной памяти, на этой платформе PROGMEM
  * - hal_uart:    регистры USART0 + кольца util_ring + RS485 DE/RE
  *
  * @version 1.0.0 (MVP-1)
@@ -21,15 +22,17 @@
 #include <avr/interrupt.h>
 #include <avr/wdt.h>
 #include <avr/eeprom.h>
+#include <avr/pgmspace.h>
 
 #include "cfg_board.h"
 #include "hal_gpio.h"
 #include "hal_adc.h"
 #include "hal_pwm.h"
 #include "hal_system.h"
-#include "hal_eeprom.h"
+#include "hal_nvm.h"
 #include "hal_uart.h"
 #include "util_ring.h"
+#include "util_rom.h"
 
 /* ====================================================================
  *  hal_gpio
@@ -382,25 +385,25 @@ void hal_system_irq_restore(uint8_t state)
 }
 
 /* ====================================================================
- *  hal_eeprom
+ *  hal_nvm — долговременная память (ADR-0021)
  * ==================================================================== */
 
-void hal_eeprom_read(uint16_t addr, uint8_t *buf, uint16_t len)
+void hal_nvm_read(uint16_t addr, uint8_t *buf, uint16_t len)
 {
     eeprom_read_block(buf, (const void *)(uintptr_t)addr, len);
 }
 
-void hal_eeprom_write(uint16_t addr, const uint8_t *buf, uint16_t len)
+void hal_nvm_write(uint16_t addr, const uint8_t *buf, uint16_t len)
 {
     eeprom_update_block(buf, (void *)(uintptr_t)addr, len);
 }
 
-uint8_t hal_eeprom_read_byte(uint16_t addr)
+uint8_t hal_nvm_read_byte(uint16_t addr)
 {
     return eeprom_read_byte((const uint8_t *)(uintptr_t)addr);
 }
 
-void hal_eeprom_write_byte(uint16_t addr, uint8_t data)
+void hal_nvm_write_byte(uint16_t addr, uint8_t data)
 {
     eeprom_update_byte((uint8_t *)(uintptr_t)addr, data);
 }
@@ -586,4 +589,32 @@ uint16_t hal_encoder_get_count(encoder_channel_t ch)
     uint16_t v = encoder_count[ch];
     SREG = sreg;
     return v;
+}
+
+/* ====================================================================
+ *  util_rom — чтение постоянной памяти (ADR-0021)
+ *
+ *  У AVR гарвардская архитектура: флеш и RAM адресуются разными
+ *  инструкциями, и обычное разыменование указателя на данные с атрибутом
+ *  progmem прочитало бы RAM по тому же численному адресу. Поэтому нужен
+ *  pgm_read_*, и место ему здесь — это платформенная деталь.
+ *
+ *  Для платформ с единым адресным пространством те же функции реализованы
+ *  в util_rom.cpp разыменованием указателя; там файл закрыт условием
+ *  #ifndef __AVR__, здесь — наоборот, поэтому двух определений не бывает.
+ * ==================================================================== */
+
+uint8_t util_rom_read_u8(const void *addr)
+{
+    return pgm_read_byte(addr);
+}
+
+uint16_t util_rom_read_u16(const void *addr)
+{
+    return pgm_read_word(addr);
+}
+
+void util_rom_read_block(void *dst, const void *src, uint8_t len)
+{
+    memcpy_P(dst, src, len);
 }

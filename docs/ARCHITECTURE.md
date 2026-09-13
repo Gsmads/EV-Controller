@@ -107,7 +107,7 @@
 │  │hal_gpio│ │hal_adc│ │hal_pwm│ │hal_uart││hal_i2c│ │hal_spi ││
 │  └───────┘ └───────┘ └───────┘ └───────┘ └───────┘ └────────┘│
 │  ┌──────────┐ ┌────────────┐ ┌───────────┐                    │
-│  │hal_eeprom│ │ hal_system │ │hal_encoder│                    │
+│  │ hal_nvm  │ │ hal_system │ │hal_encoder│                    │
 │  │          │ │(tick, wdt, │ │(ext IRQ)  │                    │
 │  │          │ │ irq, reset)│ │           │                    │
 │  └──────────┘ └────────────┘ └───────────┘                    │
@@ -359,13 +359,13 @@ uint8_t hal_i2c_write_buf(uint8_t addr, uint8_t reg, const uint8_t *buf, uint8_t
 uint8_t hal_i2c_read_buf(uint8_t addr, uint8_t reg, uint8_t *buf, uint8_t len);
 ```
 
-### 4.8 hal_eeprom
+### 4.8 hal_nvm
 
 ```c
-void    hal_eeprom_read(uint16_t addr, uint8_t *buf, uint16_t len);
-void    hal_eeprom_write(uint16_t addr, const uint8_t *buf, uint16_t len);
-uint8_t hal_eeprom_read_byte(uint16_t addr);
-void    hal_eeprom_write_byte(uint16_t addr, uint8_t data);
+void    hal_nvm_read(uint16_t addr, uint8_t *buf, uint16_t len);
+void    hal_nvm_write(uint16_t addr, const uint8_t *buf, uint16_t len);
+uint8_t hal_nvm_read_byte(uint16_t addr);
+void    hal_nvm_write_byte(uint16_t addr, uint8_t data);
 ```
 
 ### 4.9 hal_system

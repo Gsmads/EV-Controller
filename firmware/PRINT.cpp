@@ -1,7 +1,7 @@
-#pragma once
 
 #include "Inc.h"
 #include "hal_uart.h"
+#include "util_rom.h"
 
 void printString(const char *s)
 {
@@ -11,10 +11,13 @@ void printString(const char *s)
 
 
 // Print a string stored in PGM-memory
-void printPgmString(const char *s)
+/* Строка лежит в постоянной памяти, поэтому читается через util_rom,
+   а не разыменованием: на гарвардской архитектуре это разные адресные
+   пространства (ADR-0021). */
+void printRomString(const char *s)
 {
   char c;
-  while ((c = pgm_read_byte_near(s++)))
+  while ((c = (char)util_rom_read_u8(s++)))
     hal_uart_write(c);
 }
 

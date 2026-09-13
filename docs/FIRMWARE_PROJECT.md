@@ -31,7 +31,7 @@
 │  (пока минимально, MVP-3+: drv_hc595, drv_pca9535, ...) │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 0: HAL (Hardware Abstraction Layer)              │
-│  hal_gpio | hal_adc | hal_pwm | hal_uart | hal_eeprom   │
+│  hal_gpio | hal_adc | hal_pwm | hal_uart | hal_nvm     │
 │  hal_encoder | hal_system | hal_spi | hal_i2c           │
 │                                                          │
 │  Реализация для ATmega328P: hal_atmega328p.cpp          │

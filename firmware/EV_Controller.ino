@@ -29,7 +29,7 @@
 #include "hal_adc.h"
 #include "hal_pwm.h"
 #include "hal_system.h"
-#include "hal_eeprom.h"
+#include "hal_nvm.h"
 #include "hal_uart.h"
 #include "hal_encoder.h"
 #include "cfg_settings.h"
@@ -43,6 +43,7 @@
 #include "app_debug.h"
 #include "app_protocol.h"
 #include "PRINT.h"
+#include "util_rom.h"
 
 #define CONTROL_FREQ_HZ     100
 #define CONTROL_INTERVAL_MS 10
@@ -191,7 +192,7 @@ void setup()
     app_scheduler_add(task_debug,           DEBUG_INTERVAL_MS);
 
     app_debug_init();
-    app_debug_msg_P(PSTR("Protocol v2: layered pedals"));
+    app_debug_msg_P(UTIL_ROM_STR("Protocol v2: layered pedals"));
 }
 
 void loop()

@@ -19,21 +19,21 @@ static int pass = 0, fail = 0;
 /* ==== Mock EEPROM ==== */
 static uint8_t mock_eeprom[1024];
 
-void hal_eeprom_read(uint16_t addr, uint8_t *buf, uint16_t len) {
+void hal_nvm_read(uint16_t addr, uint8_t *buf, uint16_t len) {
     if (addr + len <= sizeof(mock_eeprom))
         memcpy(buf, mock_eeprom + addr, len);
 }
 
-void hal_eeprom_write(uint16_t addr, const uint8_t *buf, uint16_t len) {
+void hal_nvm_write(uint16_t addr, const uint8_t *buf, uint16_t len) {
     if (addr + len <= sizeof(mock_eeprom))
         memcpy(mock_eeprom + addr, buf, len);
 }
 
-uint8_t hal_eeprom_read_byte(uint16_t addr) {
+uint8_t hal_nvm_read_byte(uint16_t addr) {
     return (addr < sizeof(mock_eeprom)) ? mock_eeprom[addr] : 0xFF;
 }
 
-void hal_eeprom_write_byte(uint16_t addr, uint8_t data) {
+void hal_nvm_write_byte(uint16_t addr, uint8_t data) {
     if (addr < sizeof(mock_eeprom)) mock_eeprom[addr] = data;
 }
 
