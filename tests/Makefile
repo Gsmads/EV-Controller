@@ -15,7 +15,7 @@ CXXFLAGS := -std=c++11 -Wall -Wextra -O2
 FW       := ../firmware
 
 # All test binaries
-TESTS := test_util_math test_cfg_settings test_svc_ramp test_util_ring test_svc_speed test_svc_pedals test_cfg_params
+TESTS := test_util_math test_cfg_settings test_svc_ramp test_util_ring test_svc_speed test_svc_pedals test_cfg_params test_app_protocol
 
 .PHONY: all run clean verbose help
 
@@ -42,6 +42,9 @@ test_svc_pedals: test_svc_pedals.c $(FW)/svc_pedals.cpp $(FW)/cfg_settings.cpp $
 	$(CXX) $(CXXFLAGS) -I$(FW) -o $@ $^
 
 test_cfg_params: test_cfg_params.c $(FW)/cfg_settings.cpp $(FW)/cfg_params.cpp $(FW)/util_crc.cpp $(FW)/util_rom.cpp
+	$(CXX) $(CXXFLAGS) -I$(FW) -o $@ $^
+
+test_app_protocol: test_app_protocol.c $(FW)/app_protocol.cpp $(FW)/cfg_settings.cpp $(FW)/cfg_params.cpp $(FW)/svc_pedals.cpp $(FW)/svc_speed.cpp $(FW)/util_crc.cpp $(FW)/util_math.cpp $(FW)/util_rom.cpp
 	$(CXX) $(CXXFLAGS) -I$(FW) -o $@ $^
 
 # --- Run all ---
@@ -82,6 +85,11 @@ run: all
 	@echo "  Running test_cfg_params"
 	@echo "============================================"
 	@./test_cfg_params
+	@echo ""
+	@echo "============================================"
+	@echo "  Running test_app_protocol"
+	@echo "============================================"
+	@./test_app_protocol
 	@echo ""
 	@echo "============================================"
 	@echo "  All tests completed."

@@ -163,8 +163,9 @@ svc_motor_set_pwm(pwm);
 cd tests
 make run
 ```
-Сейчас 228 тестов: util_math (33), cfg_settings (65), svc_ramp (10),
-util_ring (48), svc_speed (18), svc_pedals (17), cfg_params (37).
+Сейчас 248 тестов: util_math (33), cfg_settings (65), svc_ramp (10),
+util_ring (48), svc_speed (18), svc_pedals (17), cfg_params (37),
+app_protocol (20).
 
 ### Тесты, которые нужно добавить
 - [ ] `test_svc_pedals.c` — тестировать combinator во всех режимах,
