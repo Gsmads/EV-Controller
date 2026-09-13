@@ -286,6 +286,173 @@ void test_brake_combinator_default_is_max(void) {
               "слабая команда родителя не ослабляет тормоз ребёнка");
 }
 
+/* ====================================================================
+ *  Кривая отклика, мёртвая зона и пересчёт в ШИМ
+ *
+ *  Эталонные точки посчитаны вручную по цепочке
+ *  сырое -> util_map_u16(10..1000 -> 0..1023) -> мёртвая зона 20 -> кривая.
+ *  Сырое 273 даёт 256 (четверть хода), сырое 516 - ровно 512.
+ *
+ *  Фильтр здесь намеренно выведен из игры: svc_pedals_init() засевает
+ *  EMA точным значением сигнала, поэтому под проверкой остаётся
+ *  арифметика кривой, а не остаток сходимости фильтра (он проверяется
+ *  отдельно, test_ema_never_reaches_the_top).
+ * ==================================================================== */
+
+/** Подать на газ точное значение: засеять фильтр и сделать один шаг. */
+static void apply_physical_gas(uint16_t raw) {
+    signal_value[ANALOG_PEDAL_GAS] = raw;
+    svc_pedals_init();
+    svc_pedals_update();
+}
+
+static void set_gas_curve(uint8_t curve) {
+    cfg_settings_get_mutable()->pedal_gas_curve = curve;
+}
+
+void test_curve_linear_passes_through(void) {
+    printf("--- test_curve_linear_passes_through ---\n");
+    setup_clean();
+    set_gas_curve(PEDAL_CURVE_LINEAR);
+    apply_physical_gas(273);
+    ASSERT_EQ(256, svc_pedals_get_gas_physical(),
+              "linear: четверть хода остаётся четвертью");
+    apply_physical_gas(516);
+    ASSERT_EQ(512, svc_pedals_get_gas_physical(), "linear: половина остаётся половиной");
+}
+
+void test_curve_quadratic_softens_start(void) {
+    printf("--- test_curve_quadratic_softens_start ---\n");
+    setup_clean();
+    set_gas_curve(PEDAL_CURVE_QUADRATIC);
+    apply_physical_gas(273);
+    /* 256^2 / 1023 = 65536 / 1023 = 64,06 -> 64 */
+    ASSERT_EQ(64, svc_pedals_get_gas_physical(),
+              "quadratic: четверть хода даёт 64 из 1023, а не 256");
+    apply_physical_gas(516);
+    /* 512^2 / 1023 = 262144 / 1023 = 256,2 -> 256 */
+    ASSERT_EQ(256, svc_pedals_get_gas_physical(),
+              "quadratic: половина хода даёт четверть газа");
+    apply_physical_gas(1000);
+    ASSERT_EQ(1023, svc_pedals_get_gas_physical(),
+              "quadratic: педаль в полу - газ в полу, кривая не отнимает потолок");
+}
+
+void test_curve_s_softens_both_ends(void) {
+    printf("--- test_curve_s_softens_both_ends ---\n");
+    setup_clean();
+    set_gas_curve(PEDAL_CURVE_S_CURVE);
+    apply_physical_gas(273);
+    /* t = 256/1023 = 0,2502; 3t^2 - 2t^3 = 0,15653; x1023 = 160,1 -> 160 */
+    ASSERT_EQ(160, svc_pedals_get_gas_physical(), "s-кривая: четверть хода даёт 160");
+    apply_physical_gas(516);
+    /* t = 1/2 - неподвижная точка: 3/4 - 1/4 = 1/2 */
+    ASSERT_EQ(512, svc_pedals_get_gas_physical(),
+              "s-кривая: середина хода - неподвижная точка, остаётся серединой");
+}
+
+void test_deadzone_renormalizes_the_rest_of_travel(void) {
+    printf("--- test_deadzone_renormalizes_the_rest_of_travel ---\n");
+    setup_clean();
+    set_gas_curve(PEDAL_CURVE_LINEAR);
+    /* deadzone = 20 в нормированных единицах. Сырое 30 даёт 20 - ещё зона. */
+    apply_physical_gas(30);
+    ASSERT_EQ(0, svc_pedals_get_gas_physical(), "внутри мёртвой зоны - ровно ноль");
+    apply_physical_gas(31);
+    ASSERT_EQ(1, svc_pedals_get_gas_physical(),
+              "сразу за зоной отсчёт начинается с единицы");
+    apply_physical_gas(1000);
+    ASSERT_EQ(1023, svc_pedals_get_gas_physical(),
+              "верх не потерян: остаток хода растянут обратно на весь диапазон");
+}
+
+void test_profile_pedal_curve_is_never_applied(void) {
+    printf("--- test_profile_pedal_curve_is_never_applied ---\n");
+    /* Дефект T-7 (docs/AUDIT.md): drive_profile_t.pedal_curve не читает
+       никто. svc_pedals_update() профиля вообще не получает и всегда
+       берёт глобальную settings_t.pedal_gas_curve. Умолчание Eco
+       обещает "спокойный отклик" квадратичной кривой - обещание не
+       выполняется. Тест фиксирует поведение как оно есть. */
+    setup_clean();
+    settings_t *s = cfg_settings_get_mutable();
+    s->pedal_gas_curve = PEDAL_CURVE_LINEAR;
+    s->profiles[DRIVE_MODE_ECO].pedal_curve = PEDAL_CURVE_QUADRATIC;
+
+    apply_physical_gas(273);
+    ASSERT_EQ(256, svc_pedals_get_gas_physical(),
+              "T-7: кривая из профиля не действует - отклик остался линейным");
+    ASSERT_EQ(PEDAL_CURVE_QUADRATIC, s->profiles[DRIVE_MODE_ECO].pedal_curve,
+              "при этом значение в профиле лежит и выглядит настройкой");
+}
+
+void test_ema_never_reaches_the_top(void) {
+    printf("--- test_ema_never_reaches_the_top ---\n");
+    /* Дефект T-6 (docs/AUDIT.md): шаг фильтра равен (delta * alpha) >> 8
+       и обнуляется, когда delta * alpha < 256. При alpha = 40 это
+       delta <= 6 сотых долей единицы - фильтр замирает, не дойдя до
+       цели. Педаль, прижатую к верхнему упору калибровки, видно как
+       1020 из 1023. Величина 0,3 %, но потолок недостижим принципиально. */
+    setup_clean();
+    set_gas_curve(PEDAL_CURVE_LINEAR);
+    settle_physical_gas(1000);
+    ASSERT_EQ(1020, svc_pedals_get_gas_physical(),
+              "T-6: педаль в верхнем упоре даёт 1020, а не 1023");
+
+    /* А с точным засевом фильтра та же педаль даёт полный ход - значит
+       недобор даёт именно фильтр, а не калибровка или мёртвая зона. */
+    apply_physical_gas(1000);
+    ASSERT_EQ(1023, svc_pedals_get_gas_physical(),
+              "тот же вход без остатка фильтра даёт ровно 1023");
+}
+
+/* ====================================================================
+ *  svc_pedals_get_target_pwm: то, что уходит в рампу
+ * ==================================================================== */
+
+void test_target_pwm_scales_by_max_pwm(void) {
+    printf("--- test_target_pwm_scales_by_max_pwm ---\n");
+    setup_clean();
+    set_gas_curve(PEDAL_CURVE_LINEAR);
+    apply_physical_gas(1000);
+    ASSERT_EQ(400, svc_pedals_get_target_pwm(400, 30),
+              "педаль в полу при max_pwm 400 даёт ровно 400");
+
+    apply_physical_gas(516);
+    /* 512 * 400 / 1023 = 204800 / 1023 = 200,19 -> 200 */
+    ASSERT_EQ(200, svc_pedals_get_target_pwm(400, 30),
+              "половина хода при max_pwm 400 даёт 200");
+}
+
+void test_target_pwm_brake_wins_over_gas(void) {
+    printf("--- test_target_pwm_brake_wins_over_gas ---\n");
+    setup_clean();
+    apply_physical_gas(1000);
+    ASSERT_EQ(1, svc_pedals_get_target_pwm(400, 30) > 0, "газ есть");
+
+    signal_value[ANALOG_PEDAL_BRAKE] = 1000;
+    for (int i = 0; i < 400; i++) svc_pedals_update();
+    ASSERT_EQ(0, svc_pedals_get_target_pwm(400, 30),
+              "ТЗ §6.2: тормоз главнее газа - цель ноль при обеих нажатых педалях");
+}
+
+void test_target_pwm_motor_deadzone_is_a_floor(void) {
+    printf("--- test_target_pwm_motor_deadzone_is_a_floor ---\n");
+    setup_clean();
+    set_gas_curve(PEDAL_CURVE_LINEAR);
+    /* Сырое 33 даёт газ 3; 3 * 400 / 1023 = 1,17 -> 1, что ниже
+       motor_deadzone. На единице ШИМ мотор только гудит, поэтому первое
+       же действующее нажатие поднимается до порога страгивания. */
+    apply_physical_gas(33);
+    ASSERT_EQ(3, svc_pedals_get_gas(), "газ 3 из 1023");
+    ASSERT_EQ(30, svc_pedals_get_target_pwm(400, 30),
+              "цель поднята с 1 до порога страгивания 30");
+
+    apply_physical_gas(30);
+    ASSERT_EQ(0, svc_pedals_get_gas(), "педаль в мёртвой зоне");
+    ASSERT_EQ(0, svc_pedals_get_target_pwm(400, 30),
+              "отпущенная педаль не поднимается до порога - ноль остаётся нулём");
+}
+
 int main(void) {
     printf("=========================================\n");
     printf("  svc_pedals Unit Tests\n");
@@ -305,6 +472,15 @@ int main(void) {
     test_combine_uart_only();
     test_unknown_combinator_falls_back_to_max();
     test_brake_combinator_default_is_max();
+    test_curve_linear_passes_through();
+    test_curve_quadratic_softens_start();
+    test_curve_s_softens_both_ends();
+    test_deadzone_renormalizes_the_rest_of_travel();
+    test_profile_pedal_curve_is_never_applied();
+    test_ema_never_reaches_the_top();
+    test_target_pwm_scales_by_max_pwm();
+    test_target_pwm_brake_wins_over_gas();
+    test_target_pwm_motor_deadzone_is_a_floor();
 
     printf("\n=========================================\n");
     printf("  Results: %d passed, %d failed\n", pass, fail);

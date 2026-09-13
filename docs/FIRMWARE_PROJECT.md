@@ -163,15 +163,15 @@ svc_motor_set_pwm(pwm);
 cd tests
 make run
 ```
-Сейчас 292 теста: util_math (33), cfg_settings (65), svc_ramp (39),
-util_ring (48), svc_speed (18), svc_pedals (32), cfg_params (37),
+Сейчас 314 тестов: util_math (33), cfg_settings (65), svc_ramp (39),
+util_ring (48), svc_speed (18), svc_pedals (54), cfg_params (37),
 app_protocol (20).
 
 ### Тесты, которые нужно добавить
 - [x] `test_svc_pedals.c` — combinator во всех пяти режимах, watchdog UART
 - [x] `test_svc_speed.c` — расчёт RPM/км/ч с известными импульсами на оборот
 - [x] `test_app_protocol.c` — парсер пакетов (валидный/битый CRC/частичный пакет/мусор)
-- [ ] `test_svc_pedals.c` — отклик при разных кривых (linear/quadratic/cubic) не покрыт
+- [x] `test_svc_pedals.c` — отклик при разных кривых, мёртвая зона, пересчёт в ШИМ
 - [x] `test_svc_ramp.cpp` — аккумулятор, интерполяция тормоза, failsafe, границы
 
 ### Тестирование на железе
