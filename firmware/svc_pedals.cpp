@@ -17,7 +17,7 @@
 
 typedef struct {
     /* Физическая педаль (от АЦП) */
-    uint8_t  adc_channel;
+    analog_signal_t signal;   /**< Какой сигнал читает эта педаль (ADR-0020) */
     uint16_t raw;
     int32_t  ema_fp;
     uint16_t physical;     /* После всех преобразований, 0–1023 */
@@ -40,7 +40,7 @@ static pedal_t brake;
 static void update_physical(pedal_t *p, uint16_t raw_min, uint16_t raw_max,
                             uint8_t deadzone, uint8_t curve_type, uint8_t ema_alpha)
 {
-    p->raw = hal_adc_read(p->adc_channel);
+    p->raw = hal_adc_read_signal(p->signal);
     p->ema_fp = util_ema_update(p->ema_fp, p->raw, ema_alpha);
     uint16_t filtered = util_ema_extract(p->ema_fp);
 
@@ -104,12 +104,11 @@ static void apply_watchdog(pedal_t *p, uint32_t now, uint16_t timeout_ms)
 
 void svc_pedals_init(void)
 {
-    /* Каналы АЦП берутся из настроек, а не из cfg_board.h: ADR-0009.
-       Настройки к этому моменту уже загружены и проверены — карта каналов
-       валидируется в cfg_settings_init(). */
-    const settings_t *cfg = cfg_settings_get();
-    gas.adc_channel   = cfg->adc_ch_pedal_gas;
-    brake.adc_channel = cfg->adc_ch_pedal_brake;
+    /* Сервис называет сигнал, а не канал (ADR-0020). Привязку сигнала
+       к каналу АЦП делает слой железа по данным из настроек — здесь о
+       номерах каналов ничего не известно и знать не нужно. */
+    gas.signal   = ANALOG_PEDAL_GAS;
+    brake.signal = ANALOG_PEDAL_BRAKE;
 
     gas.raw = 0;
     brake.raw = 0;
@@ -121,8 +120,8 @@ void svc_pedals_init(void)
     brake.uart_last_ms = 0;
 
     /* Первичное чтение для инициализации EMA */
-    uint16_t g = hal_adc_read(gas.adc_channel);
-    uint16_t b = hal_adc_read(brake.adc_channel);
+    uint16_t g = hal_adc_read_signal(gas.signal);
+    uint16_t b = hal_adc_read_signal(brake.signal);
     gas.ema_fp   = util_ema_init(g);
     brake.ema_fp = util_ema_init(b);
 }

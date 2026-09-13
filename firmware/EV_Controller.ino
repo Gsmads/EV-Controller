@@ -168,6 +168,17 @@ void setup()
 
     hal_adc_init();
 
+    /* Привязка сигналов к каналам АЦП (ADR-0020). Делается здесь, а не
+       внутри HAL: номера приходят из настроек, и читает настройки тот,
+       кто их знает. Сервисы после этого работают с именами сигналов.
+       Порядок важен — привязка обязана быть до первого чтения, иначе
+       сигнал считается непривязанным и даёт 0 со счётчиком. */
+    hal_adc_bind(ANALOG_PEDAL_GAS,      cfg->adc_ch_pedal_gas);
+    hal_adc_bind(ANALOG_PEDAL_BRAKE,    cfg->adc_ch_pedal_brake);
+    hal_adc_bind(ANALOG_CURRENT_RIGHT,  cfg->adc_ch_current_right);
+    hal_adc_bind(ANALOG_CURRENT_LEFT,   cfg->adc_ch_current_left);
+    hal_adc_bind(ANALOG_STEERING_POS,   cfg->adc_ch_steering_pos);
+
     svc_motor_init();
     svc_pedals_init();
     svc_speed_init();  /* инициализирует hal_encoder ISR */

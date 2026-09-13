@@ -75,6 +75,40 @@ void hal_adc_init(void)
 }
 
 static uint16_t adc_bad_channel = 0;
+static uint16_t adc_unbound = 0;
+
+/* Таблица привязки сигналов к каналам (ADR-0020). ADC_CHANNEL_COUNT
+   означает "не привязан": это значение недостижимо для настоящего канала. */
+static uint8_t adc_signal_map[ANALOG_SIGNAL_COUNT] = {
+    ADC_CHANNEL_COUNT, ADC_CHANNEL_COUNT, ADC_CHANNEL_COUNT,
+    ADC_CHANNEL_COUNT, ADC_CHANNEL_COUNT
+};
+
+void hal_adc_bind(analog_signal_t signal, uint8_t channel)
+{
+    if (signal >= ANALOG_SIGNAL_COUNT) {
+        return;
+    }
+    adc_signal_map[signal] = channel;
+}
+
+uint16_t hal_adc_unbound_count(void)
+{
+    return adc_unbound;
+}
+
+uint16_t hal_adc_read_signal(analog_signal_t signal)
+{
+    if (signal >= ANALOG_SIGNAL_COUNT ||
+        adc_signal_map[signal] >= ADC_CHANNEL_COUNT) {
+        if (adc_unbound != 0xFFFF) {
+            adc_unbound++;
+        }
+        return 0;   /* обоснование в hal_adc.h */
+    }
+    return hal_adc_read(adc_signal_map[signal]);
+}
+
 
 uint16_t hal_adc_bad_channel_count(void)
 {
