@@ -45,7 +45,7 @@
 | `hal_uart.h` | UART + RS485 DE/RE |
 | `hal_spi.h` | SPI (MVP-3+) |
 | `hal_i2c.h` | I2C (MVP-3+) |
-| `hal_encoder.h` | Счётчики импульсов колёс (MVP-2+) |
+| `hal_encoder.h` | Время между импульсами колёс (MVP-2+) |
 | **`hal_atmega328p.cpp`** | **Реализация всего HAL для ATmega328P** |
 
 ### Config (Cross-cutting)
@@ -158,7 +158,7 @@ app_scheduler_run();
 
 ## Тестирование
 
-### Десктопные тесты (191 тест)
+### Десктопные тесты (357 тестов)
 
 ```bash
 cd tests
@@ -167,11 +167,11 @@ cd tests
 g++ -std=c++11 -I.. -o test_util_math test_util_math.c ../util_math.cpp
 ./test_util_math
 
-# cfg_settings: 28 тестов (defaults, save/load, CRC corruption, profiles)
+# cfg_settings: 65 тестов (defaults, save/load, CRC corruption, profiles, миграции)
 g++ -std=c++11 -I.. -o test_cfg_settings test_cfg_settings.c ../cfg_settings.cpp ../util_crc.cpp
 ./test_cfg_settings
 
-# svc_ramp: 10 тестов (eco/sport accel, profile switch, brake, reset)
+# svc_ramp: 39 тестов (рампа, аккумулятор, интерполяция тормоза, failsafe)
 g++ -std=c++11 -I.. -o test_svc_ramp test_svc_ramp.cpp ../svc_ramp.cpp ../util_math.cpp
 ./test_svc_ramp
 ```
@@ -190,8 +190,8 @@ g++ -std=c++11 -I.. -o test_svc_ramp test_svc_ramp.cpp ../svc_ramp.cpp ../util_m
 
 | Модуль | Что добавится |
 |--------|---------------|
-| `hal_encoder` | ISR для INT0/INT1, счётчики импульсов |
-| `svc_speed` | Расчёт RPM, км/ч, одометр |
+| `hal_encoder` | ISR для INT0/INT1, время между импульсами (ADR-0023) |
+| `svc_speed` | Расчёт RPM и км/ч по периоду, одометр по импульсам |
 | `drv_hx711` | Чтение тензодатчика усилия руля |
 | `svc_eps` | PID-регулятор EPS (util_pid уже готов!) |
 

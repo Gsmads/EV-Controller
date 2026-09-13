@@ -385,14 +385,21 @@ void     hal_system_irq_restore(uint8_t s); // Восстановить SREG
 
 ### 4.10 hal_encoder
 
+По ADR-0023 энкодер отдаёт не счётчик, а время между импульсами: скорость
+считается периодом, а количество импульсов питает только одометр.
+
 ```c
-typedef void (*hal_encoder_callback_t)(uint8_t channel);
+typedef struct {
+    uint32_t period_us;      // время между двумя последними импульсами
+    uint32_t last_pulse_us;  // метка времени последнего импульса
+    uint16_t pulses;         // импульсов с прошлого вызова (одометр)
+    uint8_t  has_period;     // период измерен хотя бы раз
+} encoder_sample_t;
 
 void     hal_encoder_init(void);
-void     hal_encoder_attach(uint8_t channel, hal_encoder_callback_t cb);
-// ISR внутри HAL инкрементирует счётчики; сервис читает и сбрасывает
-uint32_t hal_encoder_get_count(uint8_t channel);
-void     hal_encoder_reset_count(uint8_t channel);
+// ISR берёт метку hal_system_micros() и запоминает разность с предыдущей
+void     hal_encoder_take(encoder_channel_t ch, encoder_sample_t *out);
+uint16_t hal_encoder_glitch_count(encoder_channel_t ch);
 ```
 
 ---
@@ -685,7 +692,7 @@ typedef struct {
 | `svc_speed_update` | 100 мс | Средний | Расчёт скорости |
 | `svc_telemetry_update` | 100 мс | Низкий | Отправка телеметрии |
 | `app_protocol_update` | 10 мс | Средний | Парсинг входящих пакетов |
-| `hal_system_wdt_reset` | 10 мс | Критический | Сброс watchdog |
+| `task_watchdog` | 100 мс | Критический | Сброс watchdog (только при `WATCHDOG_ENABLED = 1`, ADR-0022) |
 
 **Гарантия тактирования:** если задача выполнялась дольше интервала, 
 она запускается немедленно на следующей итерации (без накопления пропущенных вызовов).

@@ -47,7 +47,9 @@
 
 #define CONTROL_FREQ_HZ     100
 #define CONTROL_INTERVAL_MS 10
-#define SPEED_FREQ_HZ       10
+/* Частоты вызова у скорости больше нет: по ADR-0023 измерение опирается
+   на метки времени импульсов, а не на интервал между вызовами. Такт
+   задаёт только свежесть телеметрии. */
 #define SPEED_INTERVAL_MS   100
 #define DEBUG_INTERVAL_MS   200
 
@@ -87,7 +89,7 @@ static void task_control(void)
 static void task_speed_telemetry(void)
 {
     /* 1. Обновить расчёт скорости из энкодеров */
-    svc_speed_update(SPEED_FREQ_HZ);
+    svc_speed_update();
 
     /* 2. Собрать пакет телеметрии (v2 — расширенный) */
     telemetry_packet_t t;
@@ -143,6 +145,22 @@ static void task_debug(void)
 }
 
 /* ====================================================================
+ *  Задача: сброс аппаратного watchdog (ADR-0022)
+ *
+ *  Задача существует только при WATCHDOG_ENABLED = 1. Смысл именно в
+ *  том, что её выполняет планировщик: если зависнет любая задача,
+ *  планировщик до этой не дойдёт, сброса не будет и MCU перезагрузится.
+ *  Сброс из loop() в обход планировщика такой гарантии не даёт.
+ * ==================================================================== */
+
+#if WATCHDOG_ENABLED
+static void task_watchdog(void)
+{
+    hal_system_wdt_reset();
+}
+#endif
+
+/* ====================================================================
  *  SETUP / LOOP
  * ==================================================================== */
 
@@ -190,6 +208,16 @@ void setup()
     app_scheduler_add(task_control,         CONTROL_INTERVAL_MS);
     app_scheduler_add(task_speed_telemetry, SPEED_INTERVAL_MS);
     app_scheduler_add(task_debug,           DEBUG_INTERVAL_MS);
+
+#if WATCHDOG_ENABLED
+    /* Watchdog включается ПОСЛЕ всей инициализации: EEPROM, АЦП и порт
+       настраиваются один раз и укладываются в такт, но считать их время
+       заранее незачем - до этой строки watchdog просто не работает.
+       Первый сброс делается сразу, чтобы отсчёт начался с нуля. */
+    hal_system_wdt_enable();
+    hal_system_wdt_reset();
+    app_scheduler_add(task_watchdog, WATCHDOG_KICK_INTERVAL_MS);
+#endif
 
     app_debug_init();
     app_debug_msg_P(UTIL_ROM_STR("Protocol v2: layered pedals"));

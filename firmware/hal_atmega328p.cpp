@@ -325,19 +325,25 @@ uint16_t hal_pwm_get_top(pwm_timer_id_t timer)
 /* ====================================================================
  *  hal_system
  *
- *  Использует Arduino core для millis() (Timer2).
+ *  Использует Arduino core для millis() (Timer0, предделитель 64).
+ *  Timer1 занят ШИМ моторов, Timer2 свободен.
  *  Watchdog через avr/wdt.h.
  * ==================================================================== */
 
 void hal_system_init(void)
 {
-    /* Arduino core уже инициализировал Timer2 для millis() */
+    /* Arduino core уже инициализировал Timer0 для millis()/micros() */
     /* Дополнительная инициализация не требуется */
 }
 
 uint32_t hal_system_millis(void)
 {
     return millis();
+}
+
+uint32_t hal_system_micros(void)
+{
+    return micros();
 }
 
 void hal_system_delay_us(uint16_t us)
@@ -347,7 +353,11 @@ void hal_system_delay_us(uint16_t us)
 
 void hal_system_reset(void)
 {
-    /* Используем watchdog для сброса */
+    /* ОСТОРОЖНО: на стоковом загрузчике Nano этот вызов не перезагружает
+       плату, а выводит её из строя - загрузчик не сбрасывает WDRF и уходит
+       в цикл перезагрузок (подробности в cfg_board.h, ADR-0022). Функция
+       сейчас не вызывается ниоткуда; прежде чем её звать, нужен либо
+       optiboot, либо другой способ сброса. */
     wdt_enable(WDTO_15MS);
     while (1) {}
 }
@@ -533,22 +543,70 @@ void hal_uart_set_rs485_tx(uint8_t tx_mode)
 /* ====================================================================
  *  hal_encoder — INT0 (D2 = правое колесо) / INT1 (D3 = левое колесо)
  *
- *  Подсчёт импульсов на восходящем фронте. ISR минимальны:
- *  инкремент volatile-счётчика. Чтение и сброс — атомарно с cli/sei.
+ *  ADR-0023: скорость считается по времени между импульсами, а не по
+ *  их количеству за окно. ISR берёт метку времени и запоминает разность
+ *  с предыдущей; счётчик импульсов остаётся для одометра.
+ *
+ *  ISR по-прежнему короткий: micros() на ATmega328P это чтение TCNT0
+ *  и счётчика переполнений под запретом прерываний - десятки тактов,
+ *  без деления и без обращения к памяти данных сверх нужного.
  * ==================================================================== */
 
 #include "hal_encoder.h"
+#include "hal_system.h"
 
-static volatile uint16_t encoder_count[ENCODER_COUNT] = {0, 0};
+typedef struct {
+    volatile uint32_t period_us;
+    volatile uint32_t last_pulse_us;
+    volatile uint16_t pulses;
+    volatile uint16_t glitches;
+    volatile uint8_t  has_period;
+    volatile uint8_t  primed;      /**< первая метка времени уже взята */
+} encoder_state_t;
+
+static encoder_state_t encoder_state[ENCODER_COUNT];
+
+/**
+ * @brief Общее тело обработчика фронта
+ *
+ * Вызывается из ISR, поэтому прерывания уже запрещены и атомарность
+ * обеспечена аппаратно.
+ */
+static inline void encoder_pulse(uint8_t ch, uint32_t now)
+{
+    encoder_state_t *e = &encoder_state[ch];
+
+    if (!e->primed) {
+        /* Первый фронт с запуска: предыдущей метки нет, разность считать
+           не от чего. Период появится на втором фронте. */
+        e->primed = 1;
+        e->last_pulse_us = now;
+        e->pulses++;
+        return;
+    }
+
+    uint32_t dt = now - e->last_pulse_us;   /* беззнаковая разность переживает переполнение */
+
+    if (dt < ENCODER_MIN_PERIOD_US) {
+        /* Физически невозможный интервал: наводка или дребезг. Фронт не
+           считается импульсом вообще - иначе он испортил бы и период,
+           и одометр. */
+        e->glitches++;
+        return;
+    }
+
+    e->period_us     = dt;
+    e->last_pulse_us = now;
+    e->pulses++;
+    e->has_period    = 1;
+}
 
 ISR(INT0_vect) {
-    /* D2 = правое колесо */
-    encoder_count[ENCODER_RIGHT]++;
+    encoder_pulse(ENCODER_RIGHT, hal_system_micros());
 }
 
 ISR(INT1_vect) {
-    /* D3 = левое колесо */
-    encoder_count[ENCODER_LEFT]++;
+    encoder_pulse(ENCODER_LEFT, hal_system_micros());
 }
 
 void hal_encoder_init(void)
@@ -562,31 +620,50 @@ void hal_encoder_init(void)
     /* INT1 (D3): восходящий фронт */
     EICRA |= (1 << ISC11) | (1 << ISC10);
 
+    for (uint8_t i = 0; i < ENCODER_COUNT; i++) {
+        encoder_state[i].period_us     = 0;
+        encoder_state[i].last_pulse_us = 0;
+        encoder_state[i].pulses        = 0;
+        encoder_state[i].glitches      = 0;
+        encoder_state[i].has_period    = 0;
+        encoder_state[i].primed        = 0;
+    }
+
     /* Сброс флагов, разрешение прерываний */
     EIFR  |= (1 << INTF0) | (1 << INTF1);
     EIMSK |= (1 << INT0)  | (1 << INT1);
-
-    encoder_count[ENCODER_LEFT]  = 0;
-    encoder_count[ENCODER_RIGHT] = 0;
 }
 
-uint16_t hal_encoder_read_and_reset(encoder_channel_t ch)
+void hal_encoder_take(encoder_channel_t ch, encoder_sample_t *out)
 {
-    if (ch >= ENCODER_COUNT) return 0;
+    if (out == 0) return;
+
+    if (ch >= ENCODER_COUNT) {
+        out->period_us     = 0;
+        out->last_pulse_us = 0;
+        out->pulses        = 0;
+        out->has_period    = 0;
+        return;
+    }
+
+    encoder_state_t *e = &encoder_state[ch];
+
     uint8_t sreg = SREG;
     cli();
-    uint16_t v = encoder_count[ch];
-    encoder_count[ch] = 0;
+    out->period_us     = e->period_us;
+    out->last_pulse_us = e->last_pulse_us;
+    out->pulses        = e->pulses;
+    out->has_period    = e->has_period;
+    e->pulses          = 0;
     SREG = sreg;
-    return v;
 }
 
-uint16_t hal_encoder_get_count(encoder_channel_t ch)
+uint16_t hal_encoder_glitch_count(encoder_channel_t ch)
 {
     if (ch >= ENCODER_COUNT) return 0;
     uint8_t sreg = SREG;
     cli();
-    uint16_t v = encoder_count[ch];
+    uint16_t v = encoder_state[ch].glitches;
     SREG = sreg;
     return v;
 }
