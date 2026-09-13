@@ -15,7 +15,7 @@ CXXFLAGS := -std=c++11 -Wall -Wextra -O2
 FW       := ../firmware
 
 # All test binaries
-TESTS := test_util_math test_cfg_settings test_svc_ramp test_util_ring
+TESTS := test_util_math test_cfg_settings test_svc_ramp test_util_ring test_svc_speed
 
 .PHONY: all run clean verbose help
 
@@ -33,6 +33,9 @@ test_svc_ramp: test_svc_ramp.cpp $(FW)/svc_ramp.cpp $(FW)/util_math.cpp
 	$(CXX) $(CXXFLAGS) -I$(FW) -o $@ $^
 
 test_util_ring: test_util_ring.c $(FW)/util_ring.cpp
+	$(CXX) $(CXXFLAGS) -I$(FW) -o $@ $^
+
+test_svc_speed: test_svc_speed.c $(FW)/svc_speed.cpp
 	$(CXX) $(CXXFLAGS) -I$(FW) -o $@ $^
 
 # --- Run all ---
@@ -58,6 +61,11 @@ run: all
 	@echo "  Running test_util_ring"
 	@echo "============================================"
 	@./test_util_ring
+	@echo ""
+	@echo "============================================"
+	@echo "  Running test_svc_speed"
+	@echo "============================================"
+	@./test_svc_speed
 	@echo ""
 	@echo "============================================"
 	@echo "  All tests completed."

@@ -202,7 +202,7 @@ python server.py            # автопоиск порта
 ### Тесты
 
 ```bash
-cd tests && make run        # 156 тестов, ~5 секунд
+cd tests && make run        # 174 теста, ~5 секунд
 ```
 
 ---
