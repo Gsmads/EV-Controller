@@ -148,11 +148,25 @@ static void task_debug(void)
 void setup()
 {
     hal_system_init();
-    hal_uart_init(UART_BAUD_DEFAULT);
-    hal_adc_init();
 
+    /* Настройки читаются ДО порта: в них лежит скорость обмена (ADR-0019),
+       а EEPROM от порта не зависит. Обратный порядок означал бы, что порт
+       открывается на одной скорости, а настройки требуют другой. */
     cfg_settings_init();
     current_profile = cfg_settings_get_profile(DRIVE_MODE_ECO);
+
+    const settings_t *cfg = cfg_settings_get();
+    uint32_t baud = cfg_settings_baud_from_code(cfg->uart_baud_code);
+    if (baud == 0) {
+        /* Код вне таблицы. Сообщить об этом некуда — порта ещё нет, —
+           поэтому берём умолчание ADR-0015 и едем дальше. Случай возможен
+           только при совпадении CRC на испорченных данных. */
+        baud = UART_BAUD_DEFAULT;
+    }
+    hal_uart_init(baud);
+    hal_uart_set_tx_policy((hal_uart_tx_policy_t)cfg->uart_tx_policy);
+
+    hal_adc_init();
 
     svc_motor_init();
     svc_pedals_init();
@@ -166,7 +180,7 @@ void setup()
     app_scheduler_add(task_debug,           DEBUG_INTERVAL_MS);
 
     app_debug_init();
-    app_debug_msg_P(PSTR("Protocol v2: layered pedals, 9600 baud"));
+    app_debug_msg_P(PSTR("Protocol v2: layered pedals"));
 }
 
 void loop()

@@ -27,7 +27,11 @@
  * ==================================================================== */
 
 #define SETTINGS_MAGIC          0x4556  /* "EV" */
-#define SETTINGS_VERSION        2       /* v2: layered pedal model */
+#define SETTINGS_VERSION        3       /* v3: параметры UART (ADR-0016, ADR-0019) */
+
+/** Размер settings_t версии 2 — нужен для миграции.
+ *  Поля v3 дописаны в конец, поэтому блок v2 является префиксом блока v3. */
+#define SETTINGS_SIZE_V2        182
 #define SETTINGS_EEPROM_OFFSET  0       /* Начальный адрес в EEPROM */
 
 /* ====================================================================
@@ -40,6 +44,38 @@ typedef enum {
     PEDAL_CURVE_QUADRATIC = 1,
     PEDAL_CURVE_S_CURVE   = 2
 } pedal_curve_t;
+
+/**
+ * @brief Коды допустимых скоростей UART (ADR-0019)
+ *
+ * Скорость хранится кодом, а не числом: произвольное значение в настройки
+ * попасть не может, и делитель никогда не окажется бессмысленным.
+ *
+ * ВАЖНО: коды только дописываются в конец. Перестановка изменила бы смысл
+ * уже сохранённых в EEPROM значений — плата после обновления заговорила бы
+ * на другой скорости.
+ */
+typedef enum {
+    UART_BAUD_CODE_9600   = 0,
+    UART_BAUD_CODE_19200  = 1,
+    UART_BAUD_CODE_38400  = 2,
+    UART_BAUD_CODE_57600  = 3,
+    UART_BAUD_CODE_115200 = 4,
+    UART_BAUD_CODE_250000 = 5,   /**< Умолчание, ADR-0015 */
+    UART_BAUD_CODE_500000 = 6,
+    UART_BAUD_CODE_COUNT  = 7
+} uart_baud_code_t;
+
+/**
+ * @brief Политика при нехватке места в буфере передачи (ADR-0016)
+ *
+ * Числовые значения совпадают с hal_uart_tx_policy_t. Дублирование
+ * намеренное: cfg_settings — сквозной модуль и не включает заголовки HAL.
+ */
+typedef enum {
+    TX_OVERFLOW_DROP_PACKET = 0,  /**< Умолчание: кадр не пишется целиком */
+    TX_OVERFLOW_BLOCK       = 1   /**< Ждать освобождения места */
+} tx_overflow_policy_t;
 
 /** Идентификаторы режимов вождения */
 typedef enum {
@@ -126,11 +162,27 @@ typedef struct __attribute__((packed)) {
     uint8_t  brake_combinator;      /**< pedal_combinator_t для тормоза */
     uint16_t uart_pedal_timeout_ms; /**< Watchdog виртуальных педалей */
 
+    /* --- Параметры UART (v3) ---
+       Дописаны в конец намеренно: так блок версии 2 остаётся префиксом
+       блока версии 3, и миграция сводится к чтению префикса. */
+    uint8_t  uart_baud_code;        /**< uart_baud_code_t, ADR-0019 */
+    uint8_t  uart_tx_policy;        /**< tx_overflow_policy_t, ADR-0016 */
+    uint16_t uart_baud_probation_ms;/**< Испытательный период скорости, ADR-0019 */
+
 } settings_t;
 
 /* ====================================================================
  *  Публичный API
  * ==================================================================== */
+
+/**
+ * @brief Скорость в бодах по коду
+ *
+ * @param code Код из uart_baud_code_t
+ * @return Скорость, бод; 0 если код недопустим — у отказа должно быть
+ *         отличимое значение, а не подстановка умолчания молча
+ */
+uint32_t cfg_settings_baud_from_code(uint8_t code);
 
 /**
  * @brief Инициализация: загрузка настроек из EEPROM
