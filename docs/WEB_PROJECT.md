@@ -211,9 +211,15 @@ python server.py -v                              # verbose log
 
 ### 6.3 Бинарный протокол Python ↔ Arduino
 
-`[0xAA] [LEN] [CMD] [PAYLOAD...] [CRC16_L] [CRC16_H]`
+`[ COBS( CMD | PAYLOAD... | CRC16_L | CRC16_H ) ] [ 0x00 ]`
 
-LEN = длина CMD + PAYLOAD. CRC16-CCITT по LEN + CMD + PAYLOAD, little-endian.
+Байта синхронизации и поля длины нет: границу кадра задаёт разделитель `0x00`,
+которого внутри кадра не бывает — кодирование COBS убирает нуль из данных
+(ADR-0024). CRC16-CCITT по CMD + PAYLOAD, little-endian.
+
+Сборка и разбор кадров целиком в `server.py` (`cobs_encode` / `cobs_decode` /
+`build_packet` / `PacketParser`). Браузер о двоичном формате не знает.
+Полное описание — `docs/PROTOCOL.md`.
 
 Команды описаны в `firmware/app_protocol.h` (CMD_SET_GAS_VIRTUAL = 0x01 и т.д.).
 **Если в firmware добавится новая команда — добавить в:**

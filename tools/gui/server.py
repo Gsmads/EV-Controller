@@ -53,8 +53,10 @@ except ImportError:
 #  Константы протокола (должны совпадать с app_protocol.h)
 # ============================================================================
 
-PROTO_SYNC = 0xAA
+PROTO_DELIMITER = 0x00
 PROTO_MAX_PAYLOAD = 60
+PROTO_MAX_PACKET = 1 + PROTO_MAX_PAYLOAD + 2      # cmd + payload + CRC = 63
+PROTO_MAX_ENCODED = PROTO_MAX_PACKET + 1          # COBS: +1 байт = 64
 
 # Команды Host → Controller
 CMD_SET_GAS_VIRTUAL    = 0x01
@@ -111,12 +113,71 @@ def crc16_ccitt(data: bytes, init: int = 0xFFFF) -> int:
 #  Сборка и разбор пакетов
 # ============================================================================
 
+# ============================================================================
+#  COBS (должен совпадать с firmware/util_cobs.cpp)
+#
+#  Кодирование убирает байт 0x00 из данных, поэтому 0x00 можно
+#  использовать как разделитель кадров: внутри кадра он невозможен
+#  при любых данных. Подробности и отклонённые варианты — ADR-0024.
+# ============================================================================
+
+def cobs_encode(data: bytes) -> bytes:
+    out = bytearray()
+    code_pos = 0
+    out.append(0)          # место под первый байт-код
+    code = 1
+    n = len(data)
+
+    for i, b in enumerate(data):
+        if b != 0:
+            out.append(b)
+            code += 1
+            if code != 0xFF:
+                continue
+        out[code_pos] = code
+        code = 1
+        if b == 0 or i + 1 < n:
+            code_pos = len(out)
+            out.append(0)
+        else:
+            code_pos = -1   # хвостовой код не нужен
+    if code_pos >= 0:
+        out[code_pos] = code
+    return bytes(out)
+
+
+def cobs_decode(data: bytes) -> Optional[bytes]:
+    """Раскодировать. None означает «это не кадр»."""
+    out = bytearray()
+    i = 0
+    n = len(data)
+    while i < n:
+        code = data[i]
+        i += 1
+        if code == 0:
+            return None                 # нуля внутри кадра не бывает
+        for _ in range(code - 1):
+            if i >= n:
+                return None             # группа обещала больше, чем пришло
+            if data[i] == 0:
+                return None
+            out.append(data[i])
+            i += 1
+        if code != 0xFF and i < n:
+            out.append(0)
+    return bytes(out)
+
+
+# ============================================================================
+#  Сборка и разбор кадров
+# ============================================================================
+
 def build_packet(cmd: int, payload: bytes = b"") -> bytes:
-    """Построить бинарный пакет [SYNC][LEN][CMD][PAYLOAD][CRC_L][CRC_H]"""
-    length = 1 + len(payload)
-    data = bytes([length, cmd]) + payload
-    crc = crc16_ccitt(data)
-    return bytes([PROTO_SYNC]) + data + struct.pack("<H", crc)
+    """Построить кадр v3: COBS(CMD | PAYLOAD | CRC16) + разделитель."""
+    packet = bytes([cmd]) + payload
+    crc = crc16_ccitt(packet)
+    packet += struct.pack("<H", crc)
+    return cobs_encode(packet) + bytes([PROTO_DELIMITER])
 
 
 def parse_telemetry(payload: bytes) -> Optional[dict]:
@@ -159,71 +220,64 @@ def parse_telemetry(payload: bytes) -> Optional[dict]:
 # ============================================================================
 
 class PacketParser:
-    """Конечный автомат разбора бинарных пакетов от контроллера."""
+    """Разбор входящего потока от контроллера.
 
-    STATE_IDLE   = 0
-    STATE_LEN    = 1
-    STATE_DATA   = 2
-    STATE_CRC_L  = 3
-    STATE_CRC_H  = 4
+    Конечного автомата больше нет. Поток режется по разделителю 0x00,
+    которого внутри кадра не бывает по построению (COBS, ADR-0024).
+    Каждая единица между разделителями либо раскодируется в кадр, либо
+    показывается как отладочный текст.
+
+    Отладочный текст и двоичные кадры идут в одном порту. Прошивка
+    завершает каждую строку отладки тем же байтом 0x00 (app_debug.cpp),
+    поэтому текст — такая же единица обмена, просто не проходящая
+    проверку CRC. Без этого строка склеилась бы со следующим кадром и
+    потерялись бы обе.
+    """
 
     def __init__(self):
-        self.state = self.STATE_IDLE
-        self.pkt_len = 0
-        self.pkt_data = bytearray()
-        self.crc_recv = 0
-        self.text_buf = bytearray()
+        self.unit = bytearray()
+        self.too_long = False
         self.stats = {'tx': 0, 'rx': 0, 'crc_err': 0}
 
     def feed(self, byte: int):
         """Скормить парсеру один байт. Возвращает (kind, payload) либо None."""
-        if self.state == self.STATE_IDLE:
-            if byte == PROTO_SYNC:
-                # Сохраняем накопленный текст (debug-вывод от Arduino)
-                text = None
-                if self.text_buf:
-                    text = self.text_buf.decode("ascii", errors="replace").strip()
-                    self.text_buf.clear()
-                self.state = self.STATE_LEN
-                if text:
-                    return ('text', text)
-            else:
-                self.text_buf.append(byte)
-                if byte == 0x0A:  # newline
-                    text = self.text_buf.decode("ascii", errors="replace").strip()
-                    self.text_buf.clear()
-                    if text:
-                        return ('text', text)
+        if byte != PROTO_DELIMITER:
+            if self.too_long:
+                return None                       # ждём разделителя
+            if len(self.unit) >= PROTO_MAX_ENCODED:
+                # Единица длиннее любого возможного кадра. Это может быть
+                # длинная строка отладки, поэтому не выбрасываем её молча:
+                # копим до разделителя и показываем как текст, если она
+                # окажется печатной.
+                self.too_long = True
+            self.unit.append(byte)
+            return None
 
-        elif self.state == self.STATE_LEN:
-            if byte == 0 or byte > PROTO_MAX_PAYLOAD + 1:
-                self.state = self.STATE_IDLE
-            else:
-                self.pkt_len = byte
-                self.pkt_data = bytearray()
-                self.state = self.STATE_DATA
+        unit = bytes(self.unit)
+        self.unit.clear()
+        was_too_long = self.too_long
+        self.too_long = False
 
-        elif self.state == self.STATE_DATA:
-            self.pkt_data.append(byte)
-            if len(self.pkt_data) >= self.pkt_len:
-                self.state = self.STATE_CRC_L
+        if not unit:
+            return None                           # два разделителя подряд
 
-        elif self.state == self.STATE_CRC_L:
-            self.crc_recv = byte
-            self.state = self.STATE_CRC_H
-
-        elif self.state == self.STATE_CRC_H:
-            self.crc_recv |= byte << 8
-            crc_data = bytes([self.pkt_len]) + bytes(self.pkt_data)
-            crc_calc = crc16_ccitt(crc_data)
-            self.state = self.STATE_IDLE
-            self.stats['rx'] += 1
-            if crc_calc == self.crc_recv:
-                return ('packet', bytes(self.pkt_data))
-            else:
+        if not was_too_long:
+            decoded = cobs_decode(unit)
+            if decoded is not None and len(decoded) >= 3:
+                body, crc_recv = decoded[:-2], struct.unpack("<H", decoded[-2:])[0]
+                self.stats['rx'] += 1
+                if crc16_ccitt(body) == crc_recv:
+                    return ('packet', body)
                 self.stats['crc_err'] += 1
+                return None
 
+        # Кадром не оказалось. Если это печатный текст — это отладочный
+        # вывод прошивки, и его надо показать, а не проглотить.
+        text = unit.decode("ascii", errors="replace").strip("\r\n\x00 \t")
+        if text and all(32 <= c < 127 or c in (9, 10, 13) for c in unit):
+            return ('text', text)
         return None
+
 
 # ============================================================================
 #  Главный сервер

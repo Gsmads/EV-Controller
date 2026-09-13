@@ -2,14 +2,17 @@
  * @file app_protocol.cpp
  * @brief Реализация бинарного протокола (v2 — layered pedals)
  *
- * Парсер — конечный автомат:
- *   WAIT_SYNC → WAIT_LEN → WAIT_DATA → WAIT_CRC_L → WAIT_CRC_H → DISPATCH
+ * Парсер больше не конечный автомат. Кадры разделяются байтом 0x00,
+ * которого внутри кадра не бывает по построению (COBS, ADR-0024), поэтому
+ * разбор сводится к «копить до разделителя, раскодировать, проверить CRC».
+ * Состояния «жду длину» и «жду N байт данных» исчезли, а вместе с ними и
+ * дефект T-4: потеря части потока больше не уносит следующий кадр.
  *
  * Все UART-команды управления педалями идут через svc_pedals.
  * svc_pedals сам управляет watchdog'ом — если команды не приходят,
  * виртуальные педали сами сбрасываются в 0.
  *
- * @version 2.0.0
+ * @version 3.0.0
  */
 #include "app_protocol.h"
 #include "hal_uart.h"
@@ -18,6 +21,7 @@
 #include "svc_pedals.h"
 #include "svc_speed.h"
 #include "util_crc.h"
+#include "util_cobs.h"
 
 #include <stddef.h>  /* NULL */
 
@@ -25,23 +29,21 @@
  *  Состояния парсера
  * ==================================================================== */
 
-typedef enum {
-    PS_WAIT_SYNC,
-    PS_WAIT_LEN,
-    PS_WAIT_DATA,
-    PS_WAIT_CRC_L,
-    PS_WAIT_CRC_H
-} parser_state_t;
+/* Парсер накапливает байты между разделителями. Состояния не нужны:
+   единственное решение принимается на разделителе. */
 
 /* ====================================================================
  *  Внутренние данные
  * ==================================================================== */
 
-static parser_state_t parser_state;
-static uint8_t  pkt_buf[PROTO_MAX_PAYLOAD + 2];
-static uint8_t  pkt_len;
-static uint8_t  pkt_idx;
-static uint16_t pkt_crc_received;
+/* Приёмный буфер: закодированный кадр без разделителя.
+   Раскодирование идёт прямо в нём — выход COBS всегда короче входа,
+   а записи попадают в уже прочитанные байты (util_cobs.h). Это экономит
+   отдельный буфер на 63 байта, что на 2 КБ ОЗУ заметно. */
+static uint8_t  rx_buf[PROTO_MAX_ENCODED];
+static uint8_t  rx_len;
+static uint8_t  rx_too_long;      /* единица обмена уже длиннее кадра */
+static uint16_t rx_bad_frames;
 
 /* ====================================================================
  *  Отправка пакетов
@@ -52,34 +54,39 @@ static void send_packet(uint8_t cmd, const uint8_t *payload, uint8_t payload_len
     if (payload_len > PROTO_MAX_PAYLOAD) {
         return;                 /* кадр такой длины протоколом не предусмотрен */
     }
-    uint8_t len = 1 + payload_len;
+
+    /* Буферы статические, а не на стеке: вместе это 128 байт, заметная
+       доля стека AVR. Функция не реентерантна и из обработчиков прерываний
+       не вызывается, поэтому один комплект на всех безопасен. */
+    static uint8_t packet[PROTO_MAX_PACKET];
+    static uint8_t frame[PROTO_MAX_FRAME];
+
+    uint8_t n = 0;
+    packet[n++] = cmd;
+    for (uint8_t i = 0; i < payload_len; i++) {
+        packet[n++] = payload[i];
+    }
 
     uint16_t crc = 0xFFFF;
-    crc = util_crc16_update(crc, len);
-    crc = util_crc16_update(crc, cmd);
-    for (uint8_t i = 0; i < payload_len; i++) {
-        crc = util_crc16_update(crc, payload[i]);
+    for (uint8_t i = 0; i < n; i++) {
+        crc = util_crc16_update(crc, packet[i]);
     }
+    packet[n++] = (uint8_t)(crc & 0xFF);
+    packet[n++] = (uint8_t)(crc >> 8);
 
-    /* Кадр собирается целиком и уходит одним блоком: решение об отбрасывании
-       принимается там, где известна его длина (ADR-0016). Побайтовая отправка
-       не давала такой возможности — при нехватке места кадр уходил бы в линию
-       усечённым, то есть валидным по длине и битым по CRC.
-
-       Буфер статический, а не на стеке: 65 байт — заметная доля стека AVR,
-       а функция не реентерантна и из обработчиков прерываний не вызывается. */
-    static uint8_t frame[PROTO_MAX_PAYLOAD + 5];
-    uint8_t n = 0;
-    frame[n++] = PROTO_SYNC;
-    frame[n++] = len;
-    frame[n++] = cmd;
-    for (uint8_t i = 0; i < payload_len; i++) {
-        frame[n++] = payload[i];
+    int16_t enc = util_cobs_encode(packet, n, frame, PROTO_MAX_ENCODED);
+    if (enc < 0) {
+        /* Недостижимо: PROTO_MAX_ENCODED посчитан из PROTO_MAX_PACKET с
+           учётом прибавки COBS. Молчать всё равно нельзя. */
+        rx_bad_frames++;
+        return;
     }
-    frame[n++] = (uint8_t)(crc & 0xFF);
-    frame[n++] = (uint8_t)(crc >> 8);
+    frame[enc] = PROTO_DELIMITER;
 
-    (void)hal_uart_write_buf(frame, n);
+    /* Кадр уходит одним блоком: решение об отбрасывании принимается там,
+       где известна его длина (ADR-0016). Побайтовая отправка при нехватке
+       места оставила бы в линии обрывок. */
+    (void)hal_uart_write_buf(frame, (uint8_t)(enc + 1));
 }
 
 static void send_ack(uint8_t original_cmd)
@@ -186,11 +193,11 @@ static void handle_reset_odometer(void)
  *  Диспетчер команд
  * ==================================================================== */
 
-static void dispatch_packet(void)
+static void dispatch_packet(const uint8_t *packet, uint8_t len)
 {
-    uint8_t cmd = pkt_buf[0];
-    const uint8_t *payload = &pkt_buf[1];
-    uint8_t payload_len = pkt_len - 1;
+    uint8_t cmd = packet[0];
+    const uint8_t *payload = &packet[1];
+    uint8_t payload_len = len - 1;
 
     switch (cmd) {
         case CMD_SET_GAS_VIRTUAL:   handle_set_gas_virtual(payload, payload_len);   break;
@@ -209,61 +216,83 @@ static void dispatch_packet(void)
 }
 
 /* ====================================================================
- *  Парсер — конечный автомат
+ *  Парсер
+ *
+ *  Кадры разделяются байтом 0x00. Внутри кадра его не бывает: COBS
+ *  убирает нули из данных (ADR-0024). Поэтому разбор состоит из двух
+ *  правил, и ни одно из них ничего не угадывает:
+ *    - не разделитель -> дописать в буфер;
+ *    - разделитель    -> попытаться разобрать накопленное.
+ *
+ *  Отсюда и восстановление после сбоя: что бы ни пришло в линию, первый
+ *  же 0x00 закрывает испорченную единицу, и следующий кадр разбирается
+ *  с чистого места. Прежний парсер искал начало по байту 0xAA, который
+ *  встречается в данных, и после оборванного кадра терял следующий
+ *  (дефект T-4).
  * ==================================================================== */
 
 static void parser_reset(void)
 {
-    parser_state = PS_WAIT_SYNC;
-    pkt_len = 0;
-    pkt_idx = 0;
+    rx_len = 0;
+    rx_too_long = 0;
+}
+
+/**
+ * @brief Разобрать накопленную единицу обмена
+ *
+ * Раскодирование идёт на месте, в rx_buf: выход COBS всегда короче входа.
+ */
+static void parser_take_unit(void)
+{
+    int16_t n = util_cobs_decode(rx_buf, rx_len, rx_buf, sizeof(rx_buf));
+
+    /* Минимум осмысленного кадра — команда и две байта CRC */
+    if (n < 3) {
+        rx_bad_frames++;
+        return;
+    }
+
+    uint8_t body = (uint8_t)n - 2;          /* команда и полезная нагрузка */
+
+    uint16_t crc = 0xFFFF;
+    for (uint8_t i = 0; i < body; i++) {
+        crc = util_crc16_update(crc, rx_buf[i]);
+    }
+    uint16_t crc_received = (uint16_t)rx_buf[body] |
+                            ((uint16_t)rx_buf[body + 1] << 8);
+
+    if (crc != crc_received) {
+        rx_bad_frames++;
+        return;
+    }
+
+    dispatch_packet(rx_buf, body);
 }
 
 static void parser_feed(uint8_t byte)
 {
-    switch (parser_state) {
-        case PS_WAIT_SYNC:
-            if (byte == PROTO_SYNC) parser_state = PS_WAIT_LEN;
-            break;
-
-        case PS_WAIT_LEN:
-            if (byte == 0 || byte > PROTO_MAX_PAYLOAD + 1) {
-                parser_reset();
-            } else {
-                pkt_len = byte;
-                pkt_idx = 0;
-                parser_state = PS_WAIT_DATA;
-            }
-            break;
-
-        case PS_WAIT_DATA:
-            pkt_buf[pkt_idx++] = byte;
-            if (pkt_idx >= pkt_len) parser_state = PS_WAIT_CRC_L;
-            break;
-
-        case PS_WAIT_CRC_L:
-            pkt_crc_received = byte;
-            parser_state = PS_WAIT_CRC_H;
-            break;
-
-        case PS_WAIT_CRC_H: {
-            pkt_crc_received |= ((uint16_t)byte << 8);
-
-            uint16_t crc = 0xFFFF;
-            crc = util_crc16_update(crc, pkt_len);
-            for (uint8_t i = 0; i < pkt_len; i++) {
-                crc = util_crc16_update(crc, pkt_buf[i]);
-            }
-
-            if (crc == pkt_crc_received) {
-                dispatch_packet();
-            }
-            /* CRC mismatch → молча отбрасываем */
-
-            parser_reset();
-            break;
+    if (byte == PROTO_DELIMITER) {
+        if (rx_too_long) {
+            /* Единица обмена не могла быть кадром: она длиннее любого
+               возможного. Разделитель её закрывает — следующий кадр
+               начинается с чистого места. */
+            rx_bad_frames++;
+        } else if (rx_len > 0) {
+            parser_take_unit();
         }
+        /* rx_len == 0 означает два разделителя подряд: пустая единица,
+           считать её испорченным кадром не за что. */
+        parser_reset();
+        return;
     }
+
+    if (rx_too_long) return;                /* ждём разделителя */
+
+    if (rx_len >= sizeof(rx_buf)) {
+        rx_too_long = 1;
+        return;
+    }
+    rx_buf[rx_len++] = byte;
 }
 
 /* ====================================================================
@@ -273,6 +302,12 @@ static void parser_feed(uint8_t byte)
 void app_protocol_init(void)
 {
     parser_reset();
+    rx_bad_frames = 0;
+}
+
+uint16_t app_protocol_bad_frames(void)
+{
+    return rx_bad_frames;
 }
 
 void app_protocol_update(void)

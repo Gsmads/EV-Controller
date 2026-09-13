@@ -60,6 +60,7 @@ firmware/
 ├── app_protocol.h/.cpp            ← Бинарный протокол UART/RS485
 ├── app_debug.h/.cpp               ← Текстовая телеметрия
 ├── util_ring.h/.cpp               ← кольцевой буфер UART (переносимый)
+├── util_cobs.h/.cpp               ← обрамление кадров протокола (ADR-0024)
 ├── PRINT.h/.cpp                   ← Форматирование без sprintf
 └── Inc.h                          ← Мастер-include
 ```
@@ -163,9 +164,9 @@ svc_motor_set_pwm(pwm);
 cd tests
 make run
 ```
-Сейчас 357 тестов: util_math (33), cfg_settings (65), svc_ramp (39),
+Сейчас 408 тестов: util_math (33), cfg_settings (65), svc_ramp (39),
 util_ring (48), svc_speed (61), svc_pedals (54), cfg_params (37),
-app_protocol (20).
+util_cobs (31), app_protocol (40).
 
 ### Тесты, которые нужно добавить
 - [x] `test_svc_pedals.c` — combinator во всех пяти режимах, watchdog UART

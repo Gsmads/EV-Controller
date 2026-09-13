@@ -59,7 +59,8 @@ HAL           hal_gpio, hal_adc, hal_pwm, hal_uart, hal_nvm,
 Hardware      ATmega328P
 ```
 
-Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_settings`, `util_math`, `util_crc`.
+Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_settings`, `util_math`,
+`util_crc`, `util_cobs`, `util_ring`, `util_rom`.
 
 ### Нерушимые правила
 
@@ -94,7 +95,7 @@ Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_s
 ## 4. Сборка, тесты, проверки
 
 ```bash
-cd tests && make run       # 357 тестов, ~5 секунд, должно быть 0 failed
+cd tests && make run       # 408 тестов, ~5 секунд, должно быть 0 failed
 cd tests && make clean     # убрать бинарники перед коммитом
 ```
 
