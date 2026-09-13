@@ -181,8 +181,19 @@ ATmega328P собрана в `hal_atmega328p.cpp`. Бизнес-логика н�
 
 ### Прошивка
 
-Открыть `firmware/EV_Controller.ino` в Arduino IDE, плата Arduino Nano,
-процессор ATmega328P. Все файлы в корне скетча компилируются автоматически.
+```bash
+sudo apt install gcc-avr avr-libc avrdude
+cd firmware
+make                            # собрать и показать расход памяти
+make flash PORT=/dev/ttyUSB0    # прошить
+```
+
+Сборка своим Makefile через `avr-gcc`, без ядра Arduino (ADR-0025). Подробности,
+заливка optiboot и разбор ошибок — [docs/BUILD.md](docs/BUILD.md).
+
+Arduino IDE тоже работает: открыть `firmware/EV_Controller.ino`, плата Arduino
+Nano, процессор ATmega328P. Но ядро в ней линкуется мёртвым грузом, и цифры
+расхода памяти получаются не про эту прошивку.
 
 > **Перед первым включением с моторами** прочитать
 > [docs/HARDWARE_BRINGUP.md](docs/HARDWARE_BRINGUP.md) — раздел A-4.
