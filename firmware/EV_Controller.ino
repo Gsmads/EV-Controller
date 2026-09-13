@@ -24,6 +24,8 @@
  * @version 2.0.0 (MVP-1 + Layered Pedals + Protocol)
  */
 
+#include <stddef.h>        /* NULL: раньше приходил из Arduino.h */
+
 #include "cfg_board.h"
 #include "hal_gpio.h"
 #include "hal_adc.h"
@@ -227,3 +229,22 @@ void loop()
 {
     app_scheduler_run();
 }
+
+/* ====================================================================
+ *  Точка входа для сборки без ядра Arduino
+ *
+ *  Arduino IDE определяет ARDUINO и приносит собственный main(), который
+ *  зовёт setup() и loop(). При сборке своим Makefile ядра нет, и точку
+ *  входа даёт этот блок. Один файл собирается обоими способами, а не
+ *  раздваивается на два входа (docs/BUILD.md).
+ * ==================================================================== */
+
+#ifndef ARDUINO
+int main(void)
+{
+    setup();
+    for (;;) {
+        loop();
+    }
+}
+#endif

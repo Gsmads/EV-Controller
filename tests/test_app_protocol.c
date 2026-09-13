@@ -19,6 +19,7 @@
 #include "../firmware/cfg_settings.h"
 #include "../firmware/cfg_params.h"
 #include "../firmware/util_crc.h"
+#include "../firmware/util_cobs.h"
 #include "../firmware/hal_adc.h"
 #include "../firmware/hal_encoder.h"
 #include "../firmware/svc_pedals.h"
@@ -102,30 +103,65 @@ static void feed(const uint8_t *bytes, uint16_t n) {
     while (rx_pos < rx_len) app_protocol_update();
 }
 
-/** Собрать корректный кадр. */
+/** Собрать корректный кадр v3: COBS(cmd|payload|crc) и разделитель. */
 static uint16_t build(uint8_t *out, uint8_t cmd, const uint8_t *payload, uint8_t plen) {
-    uint8_t len = (uint8_t)(1 + plen);
-    uint16_t crc = 0xFFFF;
-    crc = util_crc16_update(crc, len);
-    crc = util_crc16_update(crc, cmd);
-    for (uint8_t i = 0; i < plen; i++) crc = util_crc16_update(crc, payload[i]);
+    uint8_t packet[PROTO_MAX_PACKET];
+    uint8_t n = 0;
+    packet[n++] = cmd;
+    for (uint8_t i = 0; i < plen; i++) packet[n++] = payload[i];
 
-    uint16_t n = 0;
-    out[n++] = PROTO_SYNC;
-    out[n++] = len;
-    out[n++] = cmd;
-    for (uint8_t i = 0; i < plen; i++) out[n++] = payload[i];
-    out[n++] = (uint8_t)(crc & 0xFF);
-    out[n++] = (uint8_t)(crc >> 8);
-    return n;
+    uint16_t crc = 0xFFFF;
+    for (uint8_t i = 0; i < n; i++) crc = util_crc16_update(crc, packet[i]);
+    packet[n++] = (uint8_t)(crc & 0xFF);
+    packet[n++] = (uint8_t)(crc >> 8);
+
+    int16_t enc = util_cobs_encode(packet, n, out, PROTO_MAX_ENCODED);
+    if (enc < 0) return 0;
+    out[enc] = PROTO_DELIMITER;
+    return (uint16_t)(enc + 1);
 }
 
-/** Найти в ответе кадр с указанной командой. Возвращает индекс или -1. */
-static int find_response(uint8_t cmd) {
-    for (uint16_t i = 0; i + 2 < tx_len; i++) {
-        if (tx[i] == PROTO_SYNC && tx[i + 2] == cmd) return (int)i;
+/**
+ * @brief Разобрать ответ контроллера и найти кадр с указанной командой
+ *
+ * Ответ разбирается ровно так же, как его разбирал бы веб: поток режется
+ * по разделителю, каждая единица раскодируется и проверяется по CRC.
+ * Тест не подглядывает в сырые байты — иначе он проверял бы не протокол,
+ * а собственные представления о нём.
+ *
+ * @param cmd     Искомая команда ответа
+ * @param out     Куда положить полезную нагрузку (может быть NULL)
+ * @param out_len Куда положить её длину (может быть NULL)
+ * @return 1 если найден
+ */
+static int find_response_ex(uint8_t cmd, uint8_t *out, uint8_t *out_len) {
+    uint16_t start = 0;
+    for (uint16_t i = 0; i < tx_len; i++) {
+        if (tx[i] != PROTO_DELIMITER) continue;
+
+        uint16_t unit_len = i - start;
+        if (unit_len > 0 && unit_len <= PROTO_MAX_ENCODED) {
+            uint8_t dec[PROTO_MAX_PACKET];
+            int16_t n = util_cobs_decode(&tx[start], (uint8_t)unit_len, dec, sizeof(dec));
+            if (n >= 3) {
+                uint8_t body = (uint8_t)n - 2;
+                uint16_t crc = 0xFFFF;
+                for (uint8_t k = 0; k < body; k++) crc = util_crc16_update(crc, dec[k]);
+                uint16_t got = (uint16_t)dec[body] | ((uint16_t)dec[body + 1] << 8);
+                if (crc == got && dec[0] == cmd) {
+                    if (out_len) *out_len = (uint8_t)(body - 1);
+                    if (out) for (uint8_t k = 1; k < body; k++) out[k - 1] = dec[k];
+                    return 1;
+                }
+            }
+        }
+        start = i + 1;
     }
-    return -1;
+    return 0;
+}
+
+static int find_response(uint8_t cmd) {
+    return find_response_ex(cmd, 0, 0) ? 1 : -1;
 }
 
 /* ====================================================================
@@ -147,9 +183,12 @@ void test_unknown_command_nacked(void) {
     uint8_t f[8];
     uint16_t n = build(f, 0x77, NULL, 0);
     feed(f, n);
-    int at = find_response(RSP_NACK);
-    ASSERT_EQ(1, at >= 0, "неизвестная команда получила NACK, а не молчание");
-    ASSERT_EQ(ERR_UNKNOWN_CMD, tx[at + 4], "код отказа — «неизвестная команда»");
+    uint8_t pl[8]; uint8_t pl_len = 0;
+    ASSERT_EQ(1, find_response_ex(RSP_NACK, pl, &pl_len),
+              "неизвестная команда получила NACK, а не молчание");
+    ASSERT_EQ(2, pl_len, "в отказе две байта: команда и код");
+    ASSERT_EQ(0x77, pl[0], "отказ ссылается на исходную команду");
+    ASSERT_EQ(ERR_UNKNOWN_CMD, pl[1], "код отказа — «неизвестная команда»");
 }
 
 /* ====================================================================
@@ -158,8 +197,10 @@ void test_unknown_command_nacked(void) {
 
 void test_garbage_before_sync(void) {
     printf("--- test_garbage_before_sync ---\n");
+    /* Мусор без разделителя — незакрытая единица обмена. Кадр,
+       пришедший следом, закрывается своим разделителем и разбирается. */
     reset_all();
-    uint8_t noise[5] = { 0x00, 0x13, 0xFF, 0x7E, 0x01 };
+    uint8_t noise[5] = { 0x13, 0xFF, 0x7E, 0x01, 0x00 };
     feed(noise, 5);
     uint8_t f[8];
     uint16_t n = build(f, CMD_PING, NULL, 0);
@@ -170,9 +211,12 @@ void test_garbage_before_sync(void) {
 void test_bad_crc_dropped_silently(void) {
     printf("--- test_bad_crc_dropped_silently ---\n");
     reset_all();
-    uint8_t f[8];
+    uint8_t f[PROTO_MAX_FRAME];
     uint16_t n = build(f, CMD_PING, NULL, 0);
-    f[n - 1] ^= 0xFF;                       /* портим старший байт CRC */
+    /* Портим байт внутри кадра, не трогая разделитель: он на месте,
+       поэтому граница кадра известна и повреждение локально. */
+    f[1] ^= 0x55;
+    if (f[1] == PROTO_DELIMITER) f[1] = 0x5A;
     feed(f, n);
     ASSERT_EQ(0, tx_len, "кадр с несошедшимся CRC отброшен без ответа");
 
@@ -183,60 +227,137 @@ void test_bad_crc_dropped_silently(void) {
     ASSERT_EQ(1, find_response(RSP_PONG) >= 0, "следующий кадр разобран нормально");
 }
 
-void test_truncated_frame_costs_the_next_one(void) {
-    printf("--- test_truncated_frame_costs_the_next_one ---\n");
+void test_corruption_costs_only_its_own_frame(void) {
+    printf("--- test_corruption_costs_only_its_own_frame ---\n");
     /*
-     * Оборванный кадр съедает начало следующего, и это не ошибка теста,
-     * а свойство кадрирования без межкадрового таймаута.
+     * Суть закрытия T-4 (ADR-0024). Пока разделитель кадра доходит,
+     * повреждение остаётся внутри своего кадра: следующий разбирается
+     * сразу, без потерь.
      *
-     * Кадр оборвался в состоянии «жду младший байт CRC». Следующий кадр
-     * начинается с 0xAA — парсер принимает его за младший байт CRC,
-     * затем байт длины за старший, CRC не сходится, парсер сбрасывается.
-     * К этому моменту голова второго кадра уже проглочена.
-     *
-     * Записано в docs/AUDIT.md как T-4. Лечится таймаутом: молчание
-     * дольше времени передачи кадра означает конец кадра, что бы ни
-     * говорило состояние разбора.
+     * Прежний формат этого не обеспечивал. Там длина кадра бралась из
+     * поля LEN, и испорченный LEN заставлял парсер съесть до 61 чужого
+     * байта — то есть повреждение одного байта уносило соседний кадр.
+     * Теперь длины в кадре нет вовсе, границу задаёт разделитель,
+     * которого внутри кадра не бывает.
      */
     reset_all();
-    uint8_t f[8];
+    uint8_t f[PROTO_MAX_FRAME];
+
+    /* Кадр с испорченной серединой: разделитель на месте */
     uint16_t n = build(f, CMD_PING, NULL, 0);
-    feed(f, (uint16_t)(n - 2));             /* кадр оборвался на CRC */
-    ASSERT_EQ(0, tx_len, "оборванный кадр ответа не вызвал");
+    f[1] ^= 0x7F;
+    if (f[1] == PROTO_DELIMITER) f[1] = 0x3C;
+    feed(f, n);
+    ASSERT_EQ(0, tx_len, "испорченный кадр отброшен");
 
-    uint16_t n2 = build(f, CMD_PING, NULL, 0);
-    feed(f, n2);
-    ASSERT_EQ(-1, find_response(RSP_PONG),
-              "T-4: следующий кадр потерян — его голову съел хвост оборванного");
-
-    uint16_t n3 = build(f, CMD_PING, NULL, 0);
-    feed(f, n3);
+    /* Следующий кадр — сразу же, без промежуточного потерянного */
+    n = build(f, CMD_PING, NULL, 0);
+    feed(f, n);
     ASSERT_EQ(1, find_response(RSP_PONG) >= 0,
-              "но через один кадр связь восстанавливается сама");
+              "T-4: соседний кадр цел — повреждение не вышло за свои границы");
 }
 
-void test_zero_length_rejected(void) {
-    printf("--- test_zero_length_rejected ---\n");
+void test_lost_delimiter_costs_exactly_one_more_frame(void) {
+    printf("--- test_lost_delimiter_costs_exactly_one_more_frame ---\n");
+    /*
+     * Честная граница возможностей COBS. Если передатчик оборвался на
+     * середине кадра, разделитель в линию не ушёл — и сказать, что кадр
+     * кончился, попросту нечему. Байты обрывка склеиваются со следующим
+     * кадром, и он теряется вместе с ними.
+     *
+     * Что COBS всё же гарантирует: потеря ограничена ровно одним кадром,
+     * и рассинхронизация не может продлиться дольше. Второй кадр после
+     * обрыва разбирается всегда, при любых данных.
+     *
+     * Закрыть и этот случай может межкадровый таймаут поверх COBS —
+     * молчание дольше времени передачи кадра означает конец кадра. Это
+     * отдельное решение, оно не принято.
+     */
     reset_all();
-    uint8_t bad[4] = { PROTO_SYNC, 0x00, 0x00, 0x00 };
-    feed(bad, 4);
-    ASSERT_EQ(0, tx_len, "длина 0 не образует кадра");
-    uint8_t f[8];
+    uint8_t f[PROTO_MAX_FRAME];
+
+    uint16_t n = build(f, CMD_PING, NULL, 0);
+    feed(f, (uint16_t)(n - 1));             /* всё, кроме разделителя */
+    ASSERT_EQ(0, tx_len, "оборванный кадр ответа не вызвал");
+
+    n = build(f, CMD_PING, NULL, 0);
+    feed(f, n);
+    ASSERT_EQ(-1, find_response(RSP_PONG),
+              "кадр, склеенный с обрывком, теряется — разделителя у обрывка не было");
+
+    n = build(f, CMD_PING, NULL, 0);
+    feed(f, n);
+    ASSERT_EQ(1, find_response(RSP_PONG) >= 0,
+              "но ровно через один кадр связь восстанавливается, и не позже");
+}
+
+void test_recovers_from_noise_in_the_middle_of_a_frame(void) {
+    printf("--- test_recovers_from_noise_in_the_middle_of_a_frame ---\n");
+    /* Половина кадра, помеха с байтом старой синхронизации 0xAA, затем
+       разделитель. Прежний парсер мог принять 0xAA за начало кадра и
+       уехать по ложной длине; здесь ложное начало невозможно в принципе. */
+    reset_all();
+    uint8_t f[PROTO_MAX_FRAME];
+    uint16_t n = build(f, CMD_PING, NULL, 0);
+    feed(f, (uint16_t)(n / 2));
+
+    uint8_t noise[4] = { 0xAA, 0x3C, 0x7F, PROTO_DELIMITER };
+    feed(noise, 4);
+
+    n = build(f, CMD_PING, NULL, 0);
+    feed(f, n);
+    ASSERT_EQ(1, find_response(RSP_PONG) >= 0,
+              "после помехи с разделителем следующий кадр разобран сразу");
+}
+
+void test_too_short_unit_rejected(void) {
+    printf("--- test_too_short_unit_rejected ---\n");
+    /* Поля длины в протоколе больше нет — длина следует из границ кадра.
+       Осмысленный минимум: команда и два байта CRC. Всё короче — не кадр. */
+    reset_all();
+    uint8_t tiny[] = { 0x03, 0x11, 0x22, PROTO_DELIMITER };   /* два байта после разбора */
+    feed(tiny, 4);
+    ASSERT_EQ(0, tx_len, "кадр короче минимума отброшен без ответа");
+
+    uint8_t f[PROTO_MAX_FRAME];
     uint16_t n = build(f, CMD_PING, NULL, 0);
     feed(f, n);
     ASSERT_EQ(1, find_response(RSP_PONG) >= 0, "и парсер остался рабочим");
 }
 
-void test_oversized_length_rejected(void) {
-    printf("--- test_oversized_length_rejected ---\n");
+void test_empty_unit_is_not_an_error(void) {
+    printf("--- test_empty_unit_is_not_an_error ---\n");
+    /* Два разделителя подряд — пустая единица. Считать её испорченным
+       кадром не за что: в линии просто ничего не было. */
     reset_all();
-    uint8_t bad[4] = { PROTO_SYNC, (uint8_t)(PROTO_MAX_PAYLOAD + 2), 0x00, 0x00 };
-    feed(bad, 4);
-    uint8_t f[8];
+    uint8_t delims[4] = { PROTO_DELIMITER, PROTO_DELIMITER, PROTO_DELIMITER, PROTO_DELIMITER };
+    feed(delims, 4);
+    ASSERT_EQ(0, tx_len, "пустые единицы не вызывают ответа");
+
+    uint8_t f[PROTO_MAX_FRAME];
+    uint16_t n = build(f, CMD_PING, NULL, 0);
+    feed(f, n);
+    ASSERT_EQ(1, find_response(RSP_PONG) >= 0, "кадр после них разобран");
+}
+
+void test_oversized_unit_rejected(void) {
+    printf("--- test_oversized_unit_rejected ---\n");
+    /* Поток без разделителя длиннее любого возможного кадра. Приёмник
+       обязан не переполнить буфер и восстановиться на разделителе. */
+    reset_all();
+    uint8_t flood[PROTO_MAX_ENCODED * 3];
+    for (uint16_t i = 0; i < sizeof(flood); i++) flood[i] = (uint8_t)(i | 1);  /* без нулей */
+    feed(flood, sizeof(flood));
+    ASSERT_EQ(0, tx_len, "переросшая единица не породила ответа");
+
+    uint8_t delim = PROTO_DELIMITER;
+    feed(&delim, 1);
+
+    uint8_t f[PROTO_MAX_FRAME];
     uint16_t n = build(f, CMD_PING, NULL, 0);
     feed(f, n);
     ASSERT_EQ(1, find_response(RSP_PONG) >= 0,
-              "заявленная длина сверх допустимой не переполняет буфер и не ломает парсер");
+              "после переросшей единицы парсер разбирает следующий кадр");
 }
 
 /* ====================================================================
@@ -264,6 +385,55 @@ void test_ff_everywhere_in_payload(void) {
     uint16_t n = build(f, CMD_SET_BRAKE_VIRTUAL, payload, 2);
     feed(f, n);
     ASSERT_EQ(1, tx_len > 0, "кадр из одних 0xFF в данных всё равно разобран");
+}
+
+/* ====================================================================
+ *  Нулевой байт в данных: то, ради чего взят COBS
+ * ==================================================================== */
+
+void test_zero_byte_in_payload(void) {
+    printf("--- test_zero_byte_in_payload ---\n");
+    /* Разделитель кадра — 0x00, и он же встречается в данных постоянно:
+       отпущенная педаль это 0x00 0x00. Кодирование обязано убрать его из
+       кадра, иначе команда «отпустить газ» резала бы собственный кадр
+       пополам. */
+    reset_all();
+    uint8_t payload[2] = { 0x00, 0x00 };    /* газ 0 */
+    uint8_t f[16];
+    uint16_t n = build(f, CMD_SET_GAS_VIRTUAL, payload, 2);
+
+    for (uint16_t i = 0; i + 1 < n; i++) {
+        ASSERT_EQ(0, f[i] == PROTO_DELIMITER ? 1 : 0,
+                  "внутри кадра нет разделителя, хотя в данных одни нули");
+    }
+    ASSERT_EQ(PROTO_DELIMITER, f[n - 1], "разделитель стоит только в конце");
+
+    feed(f, n);
+    ASSERT_EQ(1, find_response(RSP_ACK) >= 0, "команда с нулями в данных дошла");
+    ASSERT_EQ(0, svc_pedals_get_gas_uart(), "и применилась: газ отпущен");
+}
+
+void test_zero_bytes_everywhere_in_a_long_payload(void) {
+    printf("--- test_zero_bytes_everywhere_in_a_long_payload ---\n");
+    /* Длинный кадр, набитый нулями вперемешку со значащими байтами:
+       проверяем и отсутствие разделителя внутри, и обещанную прибавку
+       ровно в один байт на кадр. */
+    reset_all();
+    uint8_t payload[PROTO_MAX_PAYLOAD];
+    for (uint8_t i = 0; i < PROTO_MAX_PAYLOAD; i++) {
+        payload[i] = (uint8_t)((i % 3 == 0) ? 0x00 : i);
+    }
+    uint8_t f[PROTO_MAX_FRAME];
+    uint16_t n = build(f, CMD_SET_PARAM, payload, PROTO_MAX_PAYLOAD);
+
+    ASSERT_EQ(PROTO_MAX_FRAME, n,
+              "максимальный кадр занимает ровно PROTO_MAX_FRAME байт");
+    int zeros_inside = 0;
+    for (uint16_t i = 0; i + 1 < n; i++) if (f[i] == PROTO_DELIMITER) zeros_inside++;
+    ASSERT_EQ(0, zeros_inside, "ни одного разделителя внутри самого длинного кадра");
+
+    feed(f, n);
+    ASSERT_EQ(1, tx_len > 0, "контроллер ответил — кадр разобран целиком");
 }
 
 /* ====================================================================
@@ -314,9 +484,15 @@ void test_two_frames_back_to_back(void) {
     n += build(stream + n, CMD_PING, NULL, 0);
     feed(stream, n);
 
+    /* Считаем ответы так же, как считал бы веб: по разделителям */
     int count = 0;
-    for (uint16_t i = 0; i + 2 < tx_len; i++) {
-        if (tx[i] == PROTO_SYNC && tx[i + 2] == RSP_PONG) count++;
+    uint16_t start = 0;
+    for (uint16_t i = 0; i < tx_len; i++) {
+        if (tx[i] != PROTO_DELIMITER) continue;
+        uint8_t dec[PROTO_MAX_PACKET];
+        int16_t d = util_cobs_decode(&tx[start], (uint8_t)(i - start), dec, sizeof(dec));
+        if (d >= 3 && dec[0] == RSP_PONG) count++;
+        start = i + 1;
     }
     ASSERT_EQ(2, count, "два кадра подряд дали два ответа");
 }
@@ -330,11 +506,16 @@ int main(void) {
     test_unknown_command_nacked();
     test_garbage_before_sync();
     test_bad_crc_dropped_silently();
-    test_truncated_frame_costs_the_next_one();
-    test_zero_length_rejected();
-    test_oversized_length_rejected();
+    test_corruption_costs_only_its_own_frame();
+    test_lost_delimiter_costs_exactly_one_more_frame();
+    test_recovers_from_noise_in_the_middle_of_a_frame();
+    test_too_short_unit_rejected();
+    test_empty_unit_is_not_an_error();
+    test_oversized_unit_rejected();
     test_ff_byte_in_payload();
     test_ff_everywhere_in_payload();
+    test_zero_byte_in_payload();
+    test_zero_bytes_everywhere_in_a_long_payload();
     test_set_param_out_of_range_nacked();
     test_set_param_valid_acked();
     test_two_frames_back_to_back();

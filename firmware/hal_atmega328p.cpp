@@ -6,10 +6,10 @@
  * При портировании — заменить этот файл на hal_<platform>.cpp.
  *
  * Реализует:
- * - hal_gpio:    pinMode/digitalWrite/digitalRead через регистры
+ * - hal_gpio:    режим, запись и чтение вывода прямо через регистры портов
  * - hal_adc:     10-бит АЦП через регистры ADMUX/ADCSRA
  * - hal_pwm:     Timer1 Phase-Correct/Fast PWM, произвольный TOP
- * - hal_system:  millis (через Arduino core Timer2), watchdog, IRQ
+ * - hal_system:  millis/micros на своём Timer0, watchdog, IRQ
  * - hal_nvm:     долговременная память, на этой платформе avr/eeprom.h
  * - util_rom:    чтение постоянной памяти, на этой платформе PROGMEM
  * - hal_uart:    регистры USART0 + кольца util_ring + RS485 DE/RE
@@ -17,12 +17,12 @@
  * @version 1.0.0 (MVP-1)
  */
 
-#include <Arduino.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/wdt.h>
 #include <avr/eeprom.h>
 #include <avr/pgmspace.h>
+#include <util/delay_basic.h>   /* _delay_loop_2 */
 
 #include "cfg_board.h"
 #include "hal_gpio.h"
@@ -38,23 +38,84 @@
  *  hal_gpio
  * ==================================================================== */
 
+/*
+ *  Номера выводов - те же, что печатает плата Nano, чтобы cfg_board.h
+ *  читался рядом со схемой. Раскладка по портам ATmega328P:
+ *
+ *    D0..D7   -> PORTD, биты 0..7
+ *    D8..D13  -> PORTB, биты 0..5
+ *    A0..A5   -> PORTC, биты 0..5   (номера 14..19)
+ *
+ *  A6 и A7 у Nano только аналоговые, цифрового порта у них нет - для них
+ *  функции возвращают отказ, а не делают вид, что записали (CLAUDE.md §7).
+ */
+
+typedef struct {
+    volatile uint8_t *ddr;
+    volatile uint8_t *port;
+    volatile uint8_t *pin_reg;
+    uint8_t           bit;
+} gpio_map_t;
+
+static uint8_t gpio_resolve(uint8_t pin, gpio_map_t *out)
+{
+    if (pin <= 7) {
+        out->ddr = &DDRD; out->port = &PORTD; out->pin_reg = &PIND;
+        out->bit = pin;
+    } else if (pin <= 13) {
+        out->ddr = &DDRB; out->port = &PORTB; out->pin_reg = &PINB;
+        out->bit = (uint8_t)(pin - 8);
+    } else if (pin <= 19) {
+        out->ddr = &DDRC; out->port = &PORTC; out->pin_reg = &PINC;
+        out->bit = (uint8_t)(pin - 14);
+    } else {
+        return 0;               /* цифрового порта у вывода нет */
+    }
+    return 1;
+}
+
 void hal_gpio_mode(uint8_t pin, gpio_mode_t mode)
 {
+    gpio_map_t m;
+    if (!gpio_resolve(pin, &m)) return;
+
+    uint8_t mask = (uint8_t)(1 << m.bit);
+    uint8_t sreg = SREG;
+    cli();                      /* чтение-изменение-запись регистра порта */
     switch (mode) {
-        case GPIO_INPUT:        pinMode(pin, INPUT);        break;
-        case GPIO_INPUT_PULLUP: pinMode(pin, INPUT_PULLUP); break;
-        case GPIO_OUTPUT:       pinMode(pin, OUTPUT);       break;
+        case GPIO_INPUT:
+            *m.ddr  = (uint8_t)(*m.ddr  & ~mask);
+            *m.port = (uint8_t)(*m.port & ~mask);   /* подтяжка выключена */
+            break;
+        case GPIO_INPUT_PULLUP:
+            *m.ddr  = (uint8_t)(*m.ddr  & ~mask);
+            *m.port = (uint8_t)(*m.port |  mask);   /* подтяжка включена */
+            break;
+        case GPIO_OUTPUT:
+            *m.ddr  = (uint8_t)(*m.ddr  |  mask);
+            break;
     }
+    SREG = sreg;
 }
 
 void hal_gpio_write(uint8_t pin, gpio_state_t state)
 {
-    digitalWrite(pin, (state == GPIO_HIGH) ? HIGH : LOW);
+    gpio_map_t m;
+    if (!gpio_resolve(pin, &m)) return;
+
+    uint8_t mask = (uint8_t)(1 << m.bit);
+    uint8_t sreg = SREG;
+    cli();
+    if (state == GPIO_HIGH) *m.port = (uint8_t)(*m.port |  mask);
+    else                    *m.port = (uint8_t)(*m.port & ~mask);
+    SREG = sreg;
 }
 
 gpio_state_t hal_gpio_read(uint8_t pin)
 {
-    return (digitalRead(pin) == HIGH) ? GPIO_HIGH : GPIO_LOW;
+    gpio_map_t m;
+    if (!gpio_resolve(pin, &m)) return GPIO_LOW;
+    return ((*m.pin_reg & (uint8_t)(1 << m.bit)) != 0) ? GPIO_HIGH : GPIO_LOW;
 }
 
 /* ====================================================================
@@ -218,11 +279,11 @@ void hal_pwm_init(pwm_timer_id_t timer, const pwm_config_t *config)
 
     } else if (timer == PWM_TIMER_EPS) {
         /* --- Timer0: D6 (OC0A) --- */
-        /* Timer0 используется Arduino для millis()!
-         * В MVP-2+ рассмотреть перенос millis на Timer2
-         * или использование другого подхода для EPS PWM.
-         * Пока НЕ инициализируем Timer0 — оставляем для millis().
-         */
+        /* Timer0 занят системным временем (millis/micros, см. hal_system).
+         * Ядро Arduino здесь ни при чём: таймер настраивает эта же прошивка,
+         * и менять его режим ради ШИМ руля нельзя - остановятся часы.
+         * ШИМ электроусилителя в MVP-2 пойдёт на Timer2, который свободен.
+         * Пока Timer0 не трогаем вовсе. */
         pwm_state[timer].top = 255;
         pwm_state[timer].pwm[0] = 0;
         pwm_state[timer].pwm[1] = 0;
@@ -325,30 +386,101 @@ uint16_t hal_pwm_get_top(pwm_timer_id_t timer)
 /* ====================================================================
  *  hal_system
  *
- *  Использует Arduino core для millis() (Timer0, предделитель 64).
+ *  Собственное системное время на Timer0 (предделитель 64).
  *  Timer1 занят ШИМ моторов, Timer2 свободен.
  *  Watchdog через avr/wdt.h.
  * ==================================================================== */
 
+/*
+ *  Системное время на собственном Timer0.
+ *
+ *  Предделитель 64 при 16 МГц: такт 4 мкс, переполнение каждые 256 тактов,
+ *  то есть каждые 1024 мкс. Прерывание переполнения ведёт два счётчика.
+ *
+ *  Миллисекунды копятся точно, без дрейфа: переполнение даёт 1024 мкс, то
+ *  есть миллисекунду и ещё 24 микросекунды. Остаток накапливается и раз в
+ *  42 переполнения выдаёт лишнюю миллисекунду. Ошибки не остаётся вовсе -
+ *  в отличие от округления 1024 до 1000 или до 1024.
+ */
+
+static volatile uint32_t timer0_overflows;
+static volatile uint32_t timer0_millis;
+static volatile uint16_t timer0_millis_frac_us;
+
+ISR(TIMER0_OVF_vect)
+{
+    timer0_overflows++;
+
+    uint16_t frac = timer0_millis_frac_us + 24;   /* 1024 = 1000 + 24 */
+    uint32_t ms   = timer0_millis + 1;
+    if (frac >= 1000) {
+        frac -= 1000;
+        ms++;
+    }
+    timer0_millis_frac_us = frac;
+    timer0_millis = ms;
+}
+
 void hal_system_init(void)
 {
-    /* Arduino core уже инициализировал Timer0 для millis()/micros() */
-    /* Дополнительная инициализация не требуется */
+    /* Timer0: обычный режим счёта, предделитель 64, прерывание переполнения.
+       Timer1 занят ШИМ моторов, Timer2 свободен. */
+    TCCR0A = 0;
+    TCCR0B = (1 << CS01) | (1 << CS00);      /* clk/64 */
+    TCNT0  = 0;
+    TIFR0  = (1 << TOV0);                     /* сбросить висящий флаг */
+    TIMSK0 = (1 << TOIE0);
+
+    timer0_overflows      = 0;
+    timer0_millis         = 0;
+    timer0_millis_frac_us = 0;
+
+    sei();
 }
 
 uint32_t hal_system_millis(void)
 {
-    return millis();
+    uint8_t sreg = SREG;
+    cli();
+    uint32_t ms = timer0_millis;
+    SREG = sreg;
+    return ms;
 }
 
 uint32_t hal_system_micros(void)
 {
-    return micros();
+    uint8_t sreg = SREG;
+    cli();
+
+    uint32_t ovf = timer0_overflows;
+    uint8_t  cnt = TCNT0;
+
+    /* Переполнение могло произойти между чтением счётчика и запретом
+       прерываний: флаг взведён, обработчик ещё не отработал. Проверка
+       cnt < 255 отсеивает случай, когда флаг относится к переполнению,
+       которое произойдёт прямо сейчас. */
+    if ((TIFR0 & (1 << TOV0)) && (cnt < 255)) {
+        ovf++;
+    }
+
+    SREG = sreg;
+
+    /* ovf x 1024 + cnt x 4 = (ovf x 256 + cnt) x 4 */
+    return ((ovf << 8) | cnt) * 4UL;
 }
 
 void hal_system_delay_us(uint16_t us)
 {
-    delayMicroseconds(us);
+    /* _delay_loop_2 из avr-libc тратит ровно 4 такта на единицу счёта.
+       При 16 МГц микросекунда - это 16 тактов, то есть 4 единицы.
+       Потолок счётчика 65535 даёт предел 16383 мкс за вызов; больше
+       никакому аппаратному протоколу здесь не нужно, а тихо обрезать
+       нельзя - поэтому длинная задержка разбивается на части. */
+    while (us > 16000) {
+        _delay_loop_2(64000U);        /* 16000 мкс x 4 единицы; int на AVR 16-битный */
+        us = (uint16_t)(us - 16000);
+    }
+    if (us) _delay_loop_2((uint16_t)(us * 4));
 }
 
 void hal_system_reset(void)
@@ -547,9 +679,9 @@ void hal_uart_set_rs485_tx(uint8_t tx_mode)
  *  их количеству за окно. ISR берёт метку времени и запоминает разность
  *  с предыдущей; счётчик импульсов остаётся для одометра.
  *
- *  ISR по-прежнему короткий: micros() на ATmega328P это чтение TCNT0
- *  и счётчика переполнений под запретом прерываний - десятки тактов,
- *  без деления и без обращения к памяти данных сверх нужного.
+ *  ISR по-прежнему короткий: hal_system_micros() - это чтение TCNT0 и
+ *  счётчика переполнений, десятки тактов, без деления. Прерывания внутри
+ *  обработчика уже запрещены, так что атомарность достаётся даром.
  * ==================================================================== */
 
 #include "hal_encoder.h"

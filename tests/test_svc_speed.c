@@ -19,6 +19,7 @@
 #include "../firmware/svc_speed.h"
 #include "../firmware/cfg_board.h"
 #include "../firmware/hal_encoder.h"
+#include "../firmware/cfg_settings.h"
 
 static int pass = 0, fail = 0;
 #define ASSERT_EQ(a, b, msg) do { if ((a)==(b)) pass++; else { printf("  FAIL: %s (exp=%d got=%d)\n", msg, (int)(a), (int)(b)); fail++; } } while(0)
@@ -43,6 +44,21 @@ uint16_t hal_encoder_glitch_count(encoder_channel_t ch) {
     return (ch < ENCODER_COUNT) ? mock_glitch[ch] : 0;
 }
 
+/* Мок EEPROM — cfg_settings нужен: геометрия колеса живёт в настройках */
+static uint8_t mock_eeprom[1024];
+void hal_nvm_read(uint16_t addr, uint8_t *buf, uint16_t len) {
+    if (addr + len <= sizeof(mock_eeprom)) memcpy(buf, mock_eeprom + addr, len);
+}
+void hal_nvm_write(uint16_t addr, const uint8_t *buf, uint16_t len) {
+    if (addr + len <= sizeof(mock_eeprom)) memcpy(mock_eeprom + addr, buf, len);
+}
+uint8_t hal_nvm_read_byte(uint16_t addr) {
+    return (addr < sizeof(mock_eeprom)) ? mock_eeprom[addr] : 0xFF;
+}
+void hal_nvm_write_byte(uint16_t addr, uint8_t d) {
+    if (addr < sizeof(mock_eeprom)) mock_eeprom[addr] = d;
+}
+
 /* ==== Помощники ==== */
 
 static encoder_channel_t chan(speed_wheel_t w) {
@@ -52,7 +68,9 @@ static encoder_channel_t chan(speed_wheel_t w) {
 static void setup_clean(void) {
     memset(mock_enc, 0, sizeof(mock_enc));
     memset(mock_glitch, 0, sizeof(mock_glitch));
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
     mock_now_us = 1000000;
+    cfg_settings_init();
     svc_speed_init();
 }
 
@@ -405,6 +423,75 @@ void test_plausible_high_speed_is_not_saturated(void) {
     ASSERT_EQ(1885, svc_speed_get_kmh_x10(), "188,5 км/ч — считается, а не упирается");
 }
 
+/* ====================================================================
+ *  Геометрия из настроек (ADR-0017): подбор без перепрошивки
+ * ==================================================================== */
+
+void test_pulses_per_rev_comes_from_settings(void) {
+    printf("--- test_pulses_per_rev_comes_from_settings ---\n");
+    /* По docs/HARDWARE_BRINGUP.md настоящее число импульсов на оборот
+       скорее 30-70, чем 12. Пока оно неизвестно, его подбирают - и
+       подбирать надо без перепрошивки. */
+    setup_clean();
+    ASSERT_EQ(ENCODER_PULSES_PER_REV, cfg_settings_get()->encoder_pulses_per_rev,
+              "умолчание берётся из cfg_board.h");
+
+    both_spin(12500);
+    ASSERT_EQ(400, svc_speed_get_rpm(SPEED_WHEEL_LEFT), "при 12 имп/об это 400 об/мин");
+    ASSERT_EQ(151, svc_speed_get_kmh_x10(), "и 15,1 км/ч");
+
+    /* Вдвое больше импульсов на оборот — тот же период означает вдвое
+       меньше оборотов: 60 000 000 / (12500 x 24) = 200 */
+    cfg_settings_get_mutable()->encoder_pulses_per_rev = 24;
+    both_spin(12500);
+    ASSERT_EQ(200, svc_speed_get_rpm(SPEED_WHEEL_LEFT),
+              "24 имп/об при том же периоде дают 200 об/мин");
+    ASSERT_EQ(75, svc_speed_get_kmh_x10(), "и скорость вдвое меньше — 7,5 км/ч");
+}
+
+void test_wheel_diameter_comes_from_settings(void) {
+    printf("--- test_wheel_diameter_comes_from_settings ---\n");
+    setup_clean();
+    ASSERT_EQ(WHEEL_DIAMETER_MM, cfg_settings_get()->wheel_diameter_mm,
+              "умолчание берётся из cfg_board.h");
+
+    /* Диаметр входит в скорость линейно: вдвое больше колесо — вдвое
+       больше путь за оборот, обороты те же */
+    cfg_settings_get_mutable()->wheel_diameter_mm = 400;
+    both_spin(12500);
+    ASSERT_EQ(400, svc_speed_get_rpm(SPEED_WHEEL_LEFT), "обороты от диаметра не зависят");
+    ASSERT_EQ(302, svc_speed_get_kmh_x10(), "а скорость удвоилась: 30,2 км/ч");
+}
+
+void test_odometer_follows_settings(void) {
+    printf("--- test_odometer_follows_settings ---\n");
+    /* Путь на импульс = pi*D/ppr. При D = 400 и 12 имп/об это 104,72 мм;
+       10 оборотов на обоих колёсах дают 12566 мм = 12 м. */
+    setup_clean();
+    cfg_settings_get_mutable()->wheel_diameter_mm = 400;
+    for (int rev = 0; rev < 10; rev++) {
+        wheel_spins(SPEED_WHEEL_LEFT,  12500, ENCODER_PULSES_PER_REV);
+        wheel_spins(SPEED_WHEEL_RIGHT, 12500, ENCODER_PULSES_PER_REV);
+        svc_speed_update();
+    }
+    ASSERT_EQ32(12UL, svc_speed_get_odometer_m(),
+                "10 оборотов колеса D=400 мм = 12,57 м");
+}
+
+void test_zero_geometry_falls_back_instead_of_dividing_by_zero(void) {
+    printf("--- test_zero_geometry_falls_back_instead_of_dividing_by_zero ---\n");
+    /* Реестр параметров нуля не пропустит, но если он всё же окажется в
+       настройках (испорченный EEPROM с совпавшей CRC), деление на ноль
+       на AVR не ловится. Поэтому в сервисе стоит запасной путь. */
+    setup_clean();
+    cfg_settings_get_mutable()->encoder_pulses_per_rev = 0;
+    cfg_settings_get_mutable()->wheel_diameter_mm = 0;
+    both_spin(12500);
+    ASSERT_EQ(400, svc_speed_get_rpm(SPEED_WHEEL_LEFT),
+              "нулевая геометрия откатывается к умолчанию, а не роняет расчёт");
+    ASSERT_EQ(151, svc_speed_get_kmh_x10(), "и скорость считается по умолчанию");
+}
+
 int main(void) {
     printf("=========================================\n");
     printf("  svc_speed Unit Tests (ADR-0023)\n");
@@ -428,6 +515,10 @@ int main(void) {
     test_plausible_high_speed_is_not_saturated();
     test_glitch_count_is_visible();
     test_bad_wheel_index();
+    test_pulses_per_rev_comes_from_settings();
+    test_wheel_diameter_comes_from_settings();
+    test_odometer_follows_settings();
+    test_zero_geometry_falls_back_instead_of_dividing_by_zero();
 
     printf("\n=========================================\n");
     printf("  Results: %d passed, %d failed\n", pass, fail);

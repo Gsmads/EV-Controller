@@ -28,19 +28,20 @@ CLEAN, VIOLATION, BROKEN = 0, 1, 2
 
 passed = failed = 0
 
-# Ровно те вхождения, которые разрешает ADR-0014: pinMode 3, остальные по 1.
+# Платформенный файл после ADR-0025: ни одного вызова ядра Arduino, только
+# регистры и avr-libc. Список исключений сторожа пуст, и этот образец
+# показывает, что пустым он и должен оставаться.
 HAL = """\
-#include <Arduino.h>
 #include <avr/io.h>
+#include <avr/interrupt.h>
 void hal_gpio_mode(uint8_t p, uint8_t m) {
-    if (m == 0) { pinMode(p, INPUT); }
-    else if (m == 1) { pinMode(p, OUTPUT); }
-    else { pinMode(p, INPUT_PULLUP); }
+    if (m == 0) { DDRD &= ~(1 << p); }
+    else if (m == 1) { DDRD |= (1 << p); }
+    else { PORTD |= (1 << p); }
 }
-void hal_gpio_write(uint8_t p, uint8_t v) { digitalWrite(p, v); }
-uint8_t hal_gpio_read(uint8_t p) { return digitalRead(p); }
-uint32_t hal_system_millis(void) { return millis(); }
-void hal_system_delay_us(uint16_t us) { delayMicroseconds(us); }
+void hal_gpio_write(uint8_t p, uint8_t v) { if (v) PORTD |= (1 << p); }
+uint8_t hal_gpio_read(uint8_t p) { return (PIND >> p) & 1; }
+uint32_t hal_system_millis(void) { return 0; }
 """
 
 RAMP = """\
@@ -232,10 +233,9 @@ def main():
              "void svc_ramp_update(void) { Serial.print(1); }")})
 
     # --- исключения ADR-0014 ----------------------------------------------
-    case("лишний millis в HAL отвергается, печатаются все вхождения", VIOLATION,
+    case("вызов Arduino в HAL больше не разрешён", VIOLATION,
          {"firmware/hal_atmega328p.cpp": HAL + "uint32_t extra(void) { return millis(); }\n"},
-         expect_text=("допускает 1 вхождений millis, найдено 2",
-                      "hal_atmega328p.cpp:10", "hal_atmega328p.cpp:12"))
+         expect_text=("millis",))
     case("список исключений по заголовкам пуст — Arduino.h нарушение везде", VIOLATION,
          {"firmware/PRINT.h":
           '#pragma once\n#include "Arduino.h"\n#include <avr/wdt.h>\n'},

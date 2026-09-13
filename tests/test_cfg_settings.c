@@ -362,6 +362,52 @@ void test_migration_from_v3(void) {
     ASSERT_EQ(6, s->adc_ch_current_left, "и последнее новое поле тоже");
 }
 
+/* Блок версии 4: v3 плюс пять байт каналов АЦП. Проверяем, что миграция
+   тянет и его, и что новые поля версии 5 получают умолчания. Это третья
+   версия подряд, которую вытягивает один и тот же обобщённый код — ради
+   этого поля и дописываются строго в конец. */
+void test_migration_from_v4(void) {
+    printf("--- test_migration_from_v4 ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+
+    const uint16_t V4_SIZE = SETTINGS_SIZE_V4;
+    const uint16_t DATA_OFF = 4;
+
+    uint8_t v4[SETTINGS_SIZE_V4];
+    for (uint16_t i = 0; i < V4_SIZE; i++) v4[i] = (uint8_t)(i & 0xFF);
+    v4[0] = 77;  v4[1] = 0;          /* pedal_gas_min = 77 */
+    v4[186] = 5;                     /* adc_ch_pedal_gas, выставлен пользователем */
+    v4[187] = 4;                     /* adc_ch_pedal_brake */
+    v4[188] = 2; v4[189] = 6; v4[190] = 3;
+
+    mock_eeprom[0] = SETTINGS_MAGIC & 0xFF;
+    mock_eeprom[1] = (SETTINGS_MAGIC >> 8) & 0xFF;
+    mock_eeprom[2] = 4;
+    mock_eeprom[3] = 0;
+    memcpy(mock_eeprom + DATA_OFF, v4, V4_SIZE);
+
+    uint16_t crc = 0xFFFF;
+    crc = util_crc16_update(crc, (uint8_t)(SETTINGS_MAGIC & 0xFF));
+    crc = util_crc16_update(crc, (uint8_t)(SETTINGS_MAGIC >> 8));
+    crc = util_crc16_update(crc, 4);
+    crc = util_crc16_update(crc, 0);
+    for (uint16_t i = 0; i < V4_SIZE; i++) crc = util_crc16_update(crc, v4[i]);
+    mock_eeprom[DATA_OFF + V4_SIZE]     = (uint8_t)(crc & 0xFF);
+    mock_eeprom[DATA_OFF + V4_SIZE + 1] = (uint8_t)(crc >> 8);
+
+    cfg_settings_init();
+    const settings_t *s = cfg_settings_get();
+
+    ASSERT_EQ(1, cfg_settings_is_loaded_from_eeprom(), "версия 4 мигрирована");
+    ASSERT_EQ(77, s->pedal_gas_min, "калибровка сохранена");
+    ASSERT_EQ(5, s->adc_ch_pedal_gas, "выставленный пользователем канал сохранён");
+    ASSERT_EQ(3, s->adc_ch_steering_pos, "и последний канал версии 4 тоже");
+    ASSERT_EQ(ENCODER_PULSES_PER_REV, s->encoder_pulses_per_rev,
+              "новое поле версии 5 получило умолчание");
+    ASSERT_EQ(WHEEL_DIAMETER_MM, s->wheel_diameter_mm,
+              "и второе новое поле тоже");
+}
+
 int main(void) {
     printf("=========================================\n");
     printf("  cfg_settings Unit Tests\n");
@@ -378,6 +424,7 @@ int main(void) {
     test_migration_from_v2();
     test_migration_rejects_corrupt_v2();
     test_migration_unknown_version();
+    test_migration_from_v4();
     test_adc_defaults();
     test_adc_validation();
     test_adc_bad_map_in_eeprom_rejected();

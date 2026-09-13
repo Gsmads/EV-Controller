@@ -60,6 +60,7 @@ firmware/
 ├── app_protocol.h/.cpp            ← Бинарный протокол UART/RS485
 ├── app_debug.h/.cpp               ← Текстовая телеметрия
 ├── util_ring.h/.cpp               ← кольцевой буфер UART (переносимый)
+├── util_cobs.h/.cpp               ← обрамление кадров протокола (ADR-0024)
 ├── PRINT.h/.cpp                   ← Форматирование без sprintf
 └── Inc.h                          ← Мастер-include
 ```
@@ -148,8 +149,8 @@ svc_motor_set_pwm(pwm);
 
 | Параметр | Где | Значение | Как определить |
 |----------|-----|----------|----------------|
-| `ENCODER_PULSES_PER_REV` | cfg_board.h | 12 | Подключить датчик, прокрутить колесо вручную ровно на 1 оборот, посчитать импульсы. Можно через поле `pulses` из `hal_encoder_take()` и серийный вывод |
-| `WHEEL_DIAMETER_MM` | cfg_board.h | 200 | Замерить рулеткой |
+| `ENCODER_PULSES_PER_REV` | настройки (умолчание в cfg_board.h) | 12 | Подключить датчик, прокрутить колесо вручную ровно на 1 оборот, посчитать импульсы. Можно через поле `pulses` из `hal_encoder_take()` и серийный вывод. Подбирается с веба без перепрошивки |
+| `WHEEL_DIAMETER_MM` | настройки (умолчание в cfg_board.h) | 200 | Замерить рулеткой. Подбирается с веба без перепрошивки |
 | `PEDAL_GAS_RAW_MIN/MAX` | settings (defaults в cfg_settings.cpp) | 10/1000 | Замерить АЦП при отпущенной и нажатой педали. Веб-Settings (MVP-3) позволит подкрутить без перепрошивки |
 | `PEDAL_BRAKE_RAW_MIN/MAX` | то же | то же | то же |
 | `MOTOR_PWM_DEADZONE` | settings.motor_deadzone | 30 | Минимальный PWM при котором мотор начинает вращаться. Зависит от моторов и батареи |
@@ -163,9 +164,9 @@ svc_motor_set_pwm(pwm);
 cd tests
 make run
 ```
-Сейчас 357 тестов: util_math (33), cfg_settings (65), svc_ramp (39),
-util_ring (48), svc_speed (61), svc_pedals (54), cfg_params (37),
-app_protocol (20).
+Сейчас 425 тестов: util_math (33), cfg_settings (71), svc_ramp (39),
+util_ring (48), svc_speed (72), svc_pedals (54), cfg_params (37),
+util_cobs (31), app_protocol (40).
 
 ### Тесты, которые нужно добавить
 - [x] `test_svc_pedals.c` — combinator во всех пяти режимах, watchdog UART

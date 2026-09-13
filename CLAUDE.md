@@ -59,7 +59,8 @@ HAL           hal_gpio, hal_adc, hal_pwm, hal_uart, hal_nvm,
 Hardware      ATmega328P
 ```
 
-Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_settings`, `util_math`, `util_crc`.
+Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_settings`, `util_math`,
+`util_crc`, `util_cobs`, `util_ring`, `util_rom`.
 
 ### Нерушимые правила
 
@@ -94,12 +95,22 @@ Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_s
 ## 4. Сборка, тесты, проверки
 
 ```bash
-cd tests && make run       # 357 тестов, ~5 секунд, должно быть 0 failed
+cd tests && make run       # 425 тестов, ~5 секунд, должно быть 0 failed
 cd tests && make clean     # убрать бинарники перед коммитом
 ```
 
-Прошивка собирается Arduino IDE из папки `firmware/` (плоская структура —
-требование IDE). Все `.cpp` в корне скетча компилируются автоматически.
+Прошивка:
+```bash
+cd firmware && make        # avr-gcc, без ядра Arduino (ADR-0025)
+cd firmware && make size   # расход флеша и ОЗУ
+cd firmware && make flash PORT=/dev/ttyUSB0
+```
+Требуется `gcc-avr` и `avr-libc`. Подробности, заливка optiboot и разбор
+ошибок сборки — `docs/BUILD.md`. Arduino IDE тоже продолжает собирать
+проект, но ядро в ней линкуется мёртвым грузом.
+
+**Следить за ОЗУ.** Флеша 32 КБ и запас большой, а ОЗУ 2 КБ и занято уже
+44,8 %. `make size` печатает обе цифры, и смотреть надо на вторую.
 
 Веб:
 ```bash
@@ -179,8 +190,8 @@ cd tools/gui && pip install -r requirements.txt && python server.py
 
 | Параметр | Где | Текущее | Как получить |
 |---|---|---|---|
-| `ENCODER_PULSES_PER_REV` | `cfg_board.h` | 12 | прокрутить колесо ровно на оборот, посчитать импульсы |
-| `WHEEL_DIAMETER_MM` | `cfg_board.h` | 200 | замерить |
+| `ENCODER_PULSES_PER_REV` | настройки, умолчание в `cfg_board.h` | 12 | прокрутить колесо ровно на оборот, посчитать импульсы. По `HARDWARE_BRINGUP.md` ожидается 30–70. Меняется без перепрошивки |
+| `WHEEL_DIAMETER_MM` | настройки, умолчание в `cfg_board.h` | 200 | замерить. Меняется без перепрошивки |
 | `pedal_gas_min/max` | дефолты `cfg_settings.cpp` | 10 / 1000 | замерить АЦП в крайних положениях |
 | `motor_deadzone` | дефолты | 30 | найти минимальный ШИМ, при котором колесо трогается |
 | загрузчик Nano | — | неизвестен | от этого зависит, безопасно ли включать watchdog |
