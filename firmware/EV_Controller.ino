@@ -29,7 +29,7 @@
 #include "hal_adc.h"
 #include "hal_pwm.h"
 #include "hal_system.h"
-#include "hal_eeprom.h"
+#include "hal_nvm.h"
 #include "hal_uart.h"
 #include "hal_encoder.h"
 #include "cfg_settings.h"
@@ -43,6 +43,7 @@
 #include "app_debug.h"
 #include "app_protocol.h"
 #include "PRINT.h"
+#include "util_rom.h"
 
 #define CONTROL_FREQ_HZ     100
 #define CONTROL_INTERVAL_MS 10
@@ -168,6 +169,17 @@ void setup()
 
     hal_adc_init();
 
+    /* Привязка сигналов к каналам АЦП (ADR-0020). Делается здесь, а не
+       внутри HAL: номера приходят из настроек, и читает настройки тот,
+       кто их знает. Сервисы после этого работают с именами сигналов.
+       Порядок важен — привязка обязана быть до первого чтения, иначе
+       сигнал считается непривязанным и даёт 0 со счётчиком. */
+    hal_adc_bind(ANALOG_PEDAL_GAS,      cfg->adc_ch_pedal_gas);
+    hal_adc_bind(ANALOG_PEDAL_BRAKE,    cfg->adc_ch_pedal_brake);
+    hal_adc_bind(ANALOG_CURRENT_RIGHT,  cfg->adc_ch_current_right);
+    hal_adc_bind(ANALOG_CURRENT_LEFT,   cfg->adc_ch_current_left);
+    hal_adc_bind(ANALOG_STEERING_POS,   cfg->adc_ch_steering_pos);
+
     svc_motor_init();
     svc_pedals_init();
     svc_speed_init();  /* инициализирует hal_encoder ISR */
@@ -180,7 +192,7 @@ void setup()
     app_scheduler_add(task_debug,           DEBUG_INTERVAL_MS);
 
     app_debug_init();
-    app_debug_msg_P(PSTR("Protocol v2: layered pedals"));
+    app_debug_msg_P(UTIL_ROM_STR("Protocol v2: layered pedals"));
 }
 
 void loop()

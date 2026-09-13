@@ -19,21 +19,21 @@ static int pass = 0, fail = 0;
 /* ==== Mock EEPROM ==== */
 static uint8_t mock_eeprom[1024];
 
-void hal_eeprom_read(uint16_t addr, uint8_t *buf, uint16_t len) {
+void hal_nvm_read(uint16_t addr, uint8_t *buf, uint16_t len) {
     if (addr + len <= sizeof(mock_eeprom))
         memcpy(buf, mock_eeprom + addr, len);
 }
 
-void hal_eeprom_write(uint16_t addr, const uint8_t *buf, uint16_t len) {
+void hal_nvm_write(uint16_t addr, const uint8_t *buf, uint16_t len) {
     if (addr + len <= sizeof(mock_eeprom))
         memcpy(mock_eeprom + addr, buf, len);
 }
 
-uint8_t hal_eeprom_read_byte(uint16_t addr) {
+uint8_t hal_nvm_read_byte(uint16_t addr) {
     return (addr < sizeof(mock_eeprom)) ? mock_eeprom[addr] : 0xFF;
 }
 
-void hal_eeprom_write_byte(uint16_t addr, uint8_t data) {
+void hal_nvm_write_byte(uint16_t addr, uint8_t data) {
     if (addr < sizeof(mock_eeprom)) mock_eeprom[addr] = data;
 }
 
@@ -260,6 +260,108 @@ void test_migration_unknown_version(void) {
               "незнакомая версия — умолчания, а не попытка угадать раскладку");
 }
 
+
+/* ==== Каналы АЦП (v4): ADR-0009 ==== */
+
+void test_adc_defaults(void) {
+    printf("--- test_adc_defaults ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+    cfg_settings_init();
+    const settings_t *s = cfg_settings_get();
+    /* Та же карта, что была зашита в cfg_board.h: A0..A3 и A6 */
+    ASSERT_EQ(0, s->adc_ch_pedal_gas,     "газ — канал 0");
+    ASSERT_EQ(1, s->adc_ch_pedal_brake,   "тормоз — канал 1");
+    ASSERT_EQ(2, s->adc_ch_current_right, "ток правого — канал 2");
+    ASSERT_EQ(3, s->adc_ch_steering_pos,  "руль — канал 3");
+    ASSERT_EQ(6, s->adc_ch_current_left,  "ток левого — канал 6");
+    ASSERT_EQ(ADC_MAP_OK, cfg_settings_validate_adc(s), "умолчания проходят проверку");
+}
+
+void test_adc_validation(void) {
+    printf("--- test_adc_validation ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+    cfg_settings_init();
+    settings_t *s = cfg_settings_get_mutable();
+
+    s->adc_ch_pedal_gas = 8;
+    ASSERT_EQ(ADC_MAP_OUT_OF_RANGE, cfg_settings_validate_adc(s),
+              "канал 8 вне диапазона: у ATmega328P их восемь, 0..7");
+    s->adc_ch_pedal_gas = 255;
+    ASSERT_EQ(ADC_MAP_OUT_OF_RANGE, cfg_settings_validate_adc(s), "255 тоже вне диапазона");
+
+    s->adc_ch_pedal_gas = 0;
+    ASSERT_EQ(ADC_MAP_OK, cfg_settings_validate_adc(s), "возврат в диапазон — снова годно");
+
+    s->adc_ch_pedal_brake = 0;
+    ASSERT_EQ(ADC_MAP_DUPLICATE, cfg_settings_validate_adc(s),
+              "ADR-0009: газ и тормоз на одном канале — педаль читала бы чужой датчик");
+    s->adc_ch_current_left = 3;
+    s->adc_ch_pedal_brake = 1;
+    ASSERT_EQ(ADC_MAP_DUPLICATE, cfg_settings_validate_adc(s),
+              "совпадение любых двух каналов, не только соседних полей");
+}
+
+void test_adc_bad_map_in_eeprom_rejected(void) {
+    printf("--- test_adc_bad_map_in_eeprom_rejected ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+    cfg_settings_init();
+    settings_t *m = cfg_settings_get_mutable();
+    m->pedal_gas_min = 111;
+    m->adc_ch_pedal_brake = m->adc_ch_pedal_gas;   /* негодная карта */
+    cfg_settings_save();                            /* CRC сойдётся! */
+
+    cfg_settings_init();
+    ASSERT_EQ(0, cfg_settings_is_loaded_from_eeprom(),
+              "целый по CRC, но бессмысленный блок не принимается");
+    ASSERT_EQ(10, cfg_settings_get()->pedal_gas_min, "взяты умолчания");
+}
+
+/* Блок версии 3: v2 плюс четыре байта параметров UART. Проверяем, что
+   обобщённая миграция тянет и его, а не только версию 2. */
+void test_migration_from_v3(void) {
+    printf("--- test_migration_from_v3 ---\n");
+    memset(mock_eeprom, 0xFF, sizeof(mock_eeprom));
+
+    const uint16_t V3_SIZE = 186;
+    const uint16_t DATA_OFF = 4;
+
+    uint8_t v3[186];
+    for (uint16_t i = 0; i < V3_SIZE; i++) v3[i] = (uint8_t)(i & 0xFF);
+    v3[0] = 55;  v3[1] = 0;          /* pedal_gas_min = 55 */
+    v3[2] = 200; v3[3] = 3;          /* pedal_gas_max = 968 */
+    v3[182] = UART_BAUD_CODE_115200; /* скорость, выставленная пользователем */
+    v3[183] = TX_OVERFLOW_BLOCK;     /* политика, выставленная пользователем */
+    v3[184] = 0x88; v3[185] = 0x13;  /* probation = 5000 */
+
+    mock_eeprom[0] = SETTINGS_MAGIC & 0xFF;
+    mock_eeprom[1] = (SETTINGS_MAGIC >> 8) & 0xFF;
+    mock_eeprom[2] = 3;
+    mock_eeprom[3] = 0;
+    memcpy(mock_eeprom + DATA_OFF, v3, V3_SIZE);
+
+    uint16_t crc = 0xFFFF;
+    crc = util_crc16_update(crc, (uint8_t)(SETTINGS_MAGIC & 0xFF));
+    crc = util_crc16_update(crc, (uint8_t)(SETTINGS_MAGIC >> 8));
+    crc = util_crc16_update(crc, 3);
+    crc = util_crc16_update(crc, 0);
+    for (uint16_t i = 0; i < V3_SIZE; i++) crc = util_crc16_update(crc, v3[i]);
+    mock_eeprom[DATA_OFF + V3_SIZE]     = (uint8_t)(crc & 0xFF);
+    mock_eeprom[DATA_OFF + V3_SIZE + 1] = (uint8_t)(crc >> 8);
+
+    cfg_settings_init();
+    const settings_t *s = cfg_settings_get();
+
+    ASSERT_EQ(1, cfg_settings_is_loaded_from_eeprom(), "версия 3 мигрирована");
+    ASSERT_EQ(55,  s->pedal_gas_min, "калибровка сохранена");
+    ASSERT_EQ(968, s->pedal_gas_max, "верхняя точка сохранена");
+    ASSERT_EQ(UART_BAUD_CODE_115200, s->uart_baud_code,
+              "выбранная пользователем скорость сохранена");
+    ASSERT_EQ(TX_OVERFLOW_BLOCK, s->uart_tx_policy, "выбранная политика сохранена");
+    ASSERT_EQ(5000, s->uart_baud_probation_ms, "испытательный период сохранён");
+    ASSERT_EQ(0, s->adc_ch_pedal_gas, "новое поле версии 4 получило умолчание");
+    ASSERT_EQ(6, s->adc_ch_current_left, "и последнее новое поле тоже");
+}
+
 int main(void) {
     printf("=========================================\n");
     printf("  cfg_settings Unit Tests\n");
@@ -276,6 +378,10 @@ int main(void) {
     test_migration_from_v2();
     test_migration_rejects_corrupt_v2();
     test_migration_unknown_version();
+    test_adc_defaults();
+    test_adc_validation();
+    test_adc_bad_map_in_eeprom_rejected();
+    test_migration_from_v3();
     printf("\n=========================================\n");
     printf("  Results: %d passed, %d failed\n", pass, fail);
     printf("=========================================\n");

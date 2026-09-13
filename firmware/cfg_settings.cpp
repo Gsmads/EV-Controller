@@ -2,11 +2,11 @@
  * @file cfg_settings.c
  * @brief Реализация менеджера настроек
  *
- * Взаимодействует с EEPROM через HAL (hal_eeprom.h).
+ * Взаимодействует с EEPROM через HAL (hal_nvm.h).
  * Полностью платформонезависимый, кроме вызовов HAL.
  */
 #include "cfg_settings.h"
-#include "hal_eeprom.h"
+#include "hal_nvm.h"
 #include "util_crc.h"
 #include "svc_pedals.h"  /* For pedal_combinator_t enum */
 
@@ -191,6 +191,35 @@ static void fill_defaults(settings_t *s)
     s->uart_baud_code         = UART_BAUD_CODE_250000;  /* ADR-0015 */
     s->uart_tx_policy         = TX_OVERFLOW_DROP_PACKET;/* ADR-0016: умолчание */
     s->uart_baud_probation_ms = 10000;                  /* ADR-0019 */
+
+    /* --- Каналы АЦП (v4), ADR-0009 ---
+       Та же карта, что была зашита в cfg_board.h: A0…A3 и A6 — это каналы
+       0…3 и 6. Умолчание, а не истина: проверяется тестером на плате. */
+    s->adc_ch_pedal_gas      = 0;
+    s->adc_ch_pedal_brake    = 1;
+    s->adc_ch_current_right  = 2;
+    s->adc_ch_steering_pos   = 3;
+    s->adc_ch_current_left   = 6;
+}
+
+uint8_t cfg_settings_validate_adc(const settings_t *s)
+{
+    const uint8_t ch[5] = {
+        s->adc_ch_pedal_gas, s->adc_ch_pedal_brake,
+        s->adc_ch_current_right, s->adc_ch_current_left,
+        s->adc_ch_steering_pos
+    };
+    for (uint8_t i = 0; i < 5; i++) {
+        if (ch[i] >= ADC_CHANNEL_COUNT) {
+            return ADC_MAP_OUT_OF_RANGE;
+        }
+        for (uint8_t j = i + 1; j < 5; j++) {
+            if (ch[i] == ch[j]) {
+                return ADC_MAP_DUPLICATE;
+            }
+        }
+    }
+    return ADC_MAP_OK;
 }
 
 /** Таблица скоростей. Порядок соответствует uart_baud_code_t и не меняется. */
@@ -250,36 +279,68 @@ static uint16_t compute_crc(const settings_t *s)
  *  Публичный API
  * ==================================================================== */
 
-/**
- * @brief Миграция настроек версии 2 в версию 3
- *
- * Поля v3 дописаны в конец структуры, поэтому блок v2 — её префикс:
- * читаем префикс поверх умолчаний, новые поля остаются с умолчаниями.
- * Без этого первый же запуск после обновления сбросил бы калибровку
- * педалей, которую добывают замерами на железе (ADR-0016).
- *
- * Целостность блока проверяется правилами его собственной версии.
- */
-static void migrate_from_v2(void)
+/** Размер блока настроек по номеру версии. 0 — версия неизвестна. */
+static uint16_t size_of_version(uint8_t version)
 {
-    uint8_t old_data[SETTINGS_SIZE_V2];
-    hal_eeprom_read(EEPROM_DATA_OFFSET, old_data, SETTINGS_SIZE_V2);
+    switch (version) {
+        case 2: return SETTINGS_SIZE_V2;
+        case 3: return SETTINGS_SIZE_V3;
+        case SETTINGS_VERSION: return sizeof(settings_t);
+        default: return 0;
+    }
+}
+
+/**
+ * @brief Миграция настроек прошлой версии в текущую
+ *
+ * Одно правило вместо ветки на каждую пару версий: поля дописываются только
+ * в конец структуры, поэтому блок любой прошлой версии — префикс текущего.
+ * Читаем префикс поверх умолчаний, новые поля остаются с умолчаниями.
+ *
+ * Без миграции первый же запуск после обновления сбрасывал бы калибровку
+ * педалей, которую добывают замерами на железе.
+ *
+ * Целостность старого блока проверяется правилами ЕГО версии: CRC считался
+ * по его размеру и его номеру версии.
+ *
+ * @param version Версия блока в EEPROM
+ * @return 1 — мигрировано, 0 — нельзя (умолчания уже проставлены)
+ */
+static uint8_t migrate_from(uint8_t version)
+{
+    uint16_t old_size = size_of_version(version);
+
+    fill_defaults(&current_settings);
+
+    if (old_size == 0 || old_size > sizeof(settings_t)) {
+        return 0;   /* незнакомая или более новая версия — угадывать нечего */
+    }
+
+    uint8_t *dst = (uint8_t *)&current_settings;
+
+    /* CRC старого блока: считаем по мере чтения, не держа копию в RAM —
+       на AVR лишние 186 байт стека заметны. */
+    uint16_t crc = 0xFFFF;
+    crc = util_crc16_update(crc, (uint8_t)(SETTINGS_MAGIC & 0xFF));
+    crc = util_crc16_update(crc, (uint8_t)(SETTINGS_MAGIC >> 8));
+    crc = util_crc16_update(crc, version);
+    crc = util_crc16_update(crc, 0);
+
+    for (uint16_t i = 0; i < old_size; i++) {
+        uint8_t b = hal_nvm_read_byte((uint16_t)(EEPROM_DATA_OFFSET + i));
+        crc = util_crc16_update(crc, b);
+        dst[i] = b;
+    }
 
     uint8_t crc_buf[2];
-    hal_eeprom_read((uint16_t)(EEPROM_DATA_OFFSET + SETTINGS_SIZE_V2), crc_buf, 2);
+    hal_nvm_read((uint16_t)(EEPROM_DATA_OFFSET + old_size), crc_buf, 2);
     uint16_t stored_crc = (uint16_t)crc_buf[0] | ((uint16_t)crc_buf[1] << 8);
 
-    if (compute_crc_of(old_data, SETTINGS_SIZE_V2, 2) != stored_crc) {
+    if (crc != stored_crc) {
         fill_defaults(&current_settings);   /* блок повреждён — не гадаем */
-        return;
+        return 0;
     }
-
-    fill_defaults(&current_settings);       /* новые поля получают умолчания */
-    uint8_t *dst = (uint8_t *)&current_settings;
-    for (uint16_t i = 0; i < SETTINGS_SIZE_V2; i++) {
-        dst[i] = old_data[i];               /* старые поля — из EEPROM */
-    }
-    loaded_from_eeprom = 1;
+    return 1;
 }
 
 void cfg_settings_init(void)
@@ -288,7 +349,7 @@ void cfg_settings_init(void)
 
     /* 1. Читаем заголовок */
     eeprom_header_t header;
-    hal_eeprom_read(SETTINGS_EEPROM_OFFSET,
+    hal_nvm_read(SETTINGS_EEPROM_OFFSET,
                     (uint8_t *)&header, sizeof(header));
 
     /* 2. Проверяем magic */
@@ -299,28 +360,37 @@ void cfg_settings_init(void)
 
     /* 3. Проверяем версию */
     if (header.version != SETTINGS_VERSION) {
-        if (header.version == 2) {
-            migrate_from_v2();
-            return;
+        loaded_from_eeprom = migrate_from(header.version);
+        if (loaded_from_eeprom && cfg_settings_validate_adc(&current_settings) != ADC_MAP_OK) {
+            /* Блок цел, но карта каналов негодна: два сигнала на одном входе
+               означали бы, что педаль газа читает ток мотора (ADR-0009). */
+            fill_defaults(&current_settings);
+            loaded_from_eeprom = 0;
         }
-        /* Версия, о которой мы ничего не знаем: сброс. Это единственный
-           честный исход — угадывать раскладку чужого блока нельзя. */
-        fill_defaults(&current_settings);
         return;
     }
 
     /* 4. Читаем данные */
-    hal_eeprom_read(EEPROM_DATA_OFFSET,
+    hal_nvm_read(EEPROM_DATA_OFFSET,
                     (uint8_t *)&current_settings, sizeof(settings_t));
 
     /* 5. Читаем сохранённый CRC */
     uint8_t crc_buf[2];
-    hal_eeprom_read(EEPROM_CRC_OFFSET, crc_buf, 2);
+    hal_nvm_read(EEPROM_CRC_OFFSET, crc_buf, 2);
     uint16_t stored_crc = (uint16_t)crc_buf[0] | ((uint16_t)crc_buf[1] << 8);
 
     /* 6. Проверяем CRC */
     uint16_t computed_crc = compute_crc(&current_settings);
     if (stored_crc != computed_crc) {
+        fill_defaults(&current_settings);
+        return;
+    }
+
+    /* 7. Проверяем карту каналов АЦП (ADR-0009).
+       CRC подтверждает целостность блока, но не его осмысленность: два
+       сигнала на одном канале означали бы, что педаль газа читает ток
+       мотора, и прочитанное было бы выдано за верное. */
+    if (cfg_settings_validate_adc(&current_settings) != ADC_MAP_OK) {
         fill_defaults(&current_settings);
         return;
     }
@@ -335,17 +405,17 @@ void cfg_settings_save(void)
     header.magic    = SETTINGS_MAGIC;
     header.version  = SETTINGS_VERSION;
     header.reserved = 0;
-    hal_eeprom_write(SETTINGS_EEPROM_OFFSET,
+    hal_nvm_write(SETTINGS_EEPROM_OFFSET,
                      (const uint8_t *)&header, sizeof(header));
 
     /* 2. Записываем данные */
-    hal_eeprom_write(EEPROM_DATA_OFFSET,
+    hal_nvm_write(EEPROM_DATA_OFFSET,
                      (const uint8_t *)&current_settings, sizeof(settings_t));
 
     /* 3. Вычисляем и записываем CRC */
     uint16_t crc = compute_crc(&current_settings);
     uint8_t crc_buf[2] = { (uint8_t)(crc & 0xFF), (uint8_t)(crc >> 8) };
-    hal_eeprom_write(EEPROM_CRC_OFFSET, crc_buf, 2);
+    hal_nvm_write(EEPROM_CRC_OFFSET, crc_buf, 2);
 }
 
 void cfg_settings_reset_defaults(void)

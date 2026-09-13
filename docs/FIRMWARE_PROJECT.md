@@ -31,7 +31,7 @@
 │  (пока минимально, MVP-3+: drv_hc595, drv_pca9535, ...) │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 0: HAL (Hardware Abstraction Layer)              │
-│  hal_gpio | hal_adc | hal_pwm | hal_uart | hal_eeprom   │
+│  hal_gpio | hal_adc | hal_pwm | hal_uart | hal_nvm     │
 │  hal_encoder | hal_system | hal_spi | hal_i2c           │
 │                                                          │
 │  Реализация для ATmega328P: hal_atmega328p.cpp          │
@@ -163,8 +163,8 @@ svc_motor_set_pwm(pwm);
 cd tests
 make run
 ```
-Сейчас 135 тестов: util_math (33), cfg_settings (44), svc_ramp (10),
-util_ring (48).
+Сейчас 191 тест: util_math (33), cfg_settings (65), svc_ramp (10),
+util_ring (48), svc_speed (18), svc_pedals (17).
 
 ### Тесты, которые нужно добавить
 - [ ] `test_svc_pedals.c` — тестировать combinator во всех режимах,

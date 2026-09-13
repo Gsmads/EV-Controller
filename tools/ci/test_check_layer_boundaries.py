@@ -54,7 +54,7 @@ BASE = {
     "firmware/hal_atmega328p.cpp": HAL,
     "firmware/svc_ramp.cpp": RAMP,
     "firmware/svc_ramp.h": "#pragma once\nvoid svc_ramp_update(void);\n",
-    "firmware/PRINT.h": '#pragma once\n#include "Arduino.h"\nvoid printInteger(long n);\n',
+    "firmware/PRINT.h": '#pragma once\n#include <stdint.h>\nvoid printInteger(long n);\n',
     "tests/test_util_math.c": "#include <stdint.h>\nint main(void) { return 0; }\n",
 }
 
@@ -130,7 +130,8 @@ def main():
 
     # --- базовое поведение ------------------------------------------------
     case("чистое дерево — зелёный", CLEAN,
-         expect_text=("просмотрено", "исключение: firmware/PRINT.h / Arduino.h"))
+         expect_text=("просмотрено",),
+         reject_text=("исключение: firmware/PRINT.h", "исключение: firmware/MICRO_UART.h"))
     case("нарушение в комментарии не считается", CLEAN,
          {"firmware/svc_ramp.cpp": RAMP.replace(
              "void svc_ramp_update",
@@ -235,13 +236,13 @@ def main():
          {"firmware/hal_atmega328p.cpp": HAL + "uint32_t extra(void) { return millis(); }\n"},
          expect_text=("допускает 1 вхождений millis, найдено 2",
                       "hal_atmega328p.cpp:10", "hal_atmega328p.cpp:12"))
-    case("ATTACK исключение по заголовкам не пускает новый avr/wdt.h", VIOLATION,
+    case("список исключений по заголовкам пуст — Arduino.h нарушение везде", VIOLATION,
          {"firmware/PRINT.h":
           '#pragma once\n#include "Arduino.h"\n#include <avr/wdt.h>\n'},
-         expect_text=("avr/wdt.h",))
-    case("неиспользованное исключение названо вслух", CLEAN,
+         expect_text=("avr/wdt.h", "Arduino.h"))
+    case("пустой список исключений не ломает отчёт", CLEAN,
          {"firmware/PRINT.h": "#pragma once\nvoid printInteger(long n);\n"},
-         expect_text=("БОЛЬШЕ НЕ НУЖНО: firmware/PRINT.h",))
+         expect_text=("просмотрено",), reject_text=("исключение: firmware/PRINT.h",))
 
     # --- отказ инструмента отличается от нарушения ------------------------
     case("ATTACK нет каталога firmware — отказ, а не зелёный", BROKEN,

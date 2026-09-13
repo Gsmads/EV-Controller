@@ -37,13 +37,19 @@
 #define PIN_SPI_MOSI            11
 #define PIN_SPI_SCK             13
 
-/* ==== Аналоговые входы ==== */
-#define PIN_PEDAL_GAS           A0
-#define PIN_PEDAL_BRAKE         A1
-#define PIN_CURRENT_RIGHT       A2
-#define PIN_STEERING_POS        A3
-#define PIN_CURRENT_LEFT        A6
-#define PIN_ANALOG_RESERVE      A7
+/* ==== Аналоговые входы ====
+ * Здесь их больше нет. По ADR-0009 номера каналов АЦП живут в настройках
+ * и меняются из веба: соответствие сигналов входам определяется тем, как
+ * легли провода при монтаже, а по схеме оно не восстанавливается.
+ * См. поля adc_ch_* в settings_t.
+ *
+ * Заодно это снимало последнюю причину, по которой прошивка не собиралась:
+ * макросы A0…A7 объявлены только в Arduino.h, а cfg_board.h включают файлы
+ * слоя svc_*, которым Arduino.h запрещён (ADR-0001).
+ */
+
+/** Число каналов АЦП у ATmega328P. Свойство микроконтроллера, не настройка. */
+#define ADC_CHANNEL_COUNT       8
 
 /* ==== HC595 битовые позиции ==== */
 #define HC595_BIT_EPS_RIGHT     0

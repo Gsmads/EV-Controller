@@ -10,7 +10,8 @@
  * - hal_adc:     10-бит АЦП через регистры ADMUX/ADCSRA
  * - hal_pwm:     Timer1 Phase-Correct/Fast PWM, произвольный TOP
  * - hal_system:  millis (через Arduino core Timer2), watchdog, IRQ
- * - hal_eeprom:  avr/eeprom.h обёртка
+ * - hal_nvm:     долговременная память, на этой платформе avr/eeprom.h
+ * - util_rom:    чтение постоянной памяти, на этой платформе PROGMEM
  * - hal_uart:    регистры USART0 + кольца util_ring + RS485 DE/RE
  *
  * @version 1.0.0 (MVP-1)
@@ -21,15 +22,17 @@
 #include <avr/interrupt.h>
 #include <avr/wdt.h>
 #include <avr/eeprom.h>
+#include <avr/pgmspace.h>
 
 #include "cfg_board.h"
 #include "hal_gpio.h"
 #include "hal_adc.h"
 #include "hal_pwm.h"
 #include "hal_system.h"
-#include "hal_eeprom.h"
+#include "hal_nvm.h"
 #include "hal_uart.h"
 #include "util_ring.h"
+#include "util_rom.h"
 
 /* ====================================================================
  *  hal_gpio
@@ -74,18 +77,66 @@ void hal_adc_init(void)
     while (ADCSRA & (1 << ADSC)) {}
 }
 
+static uint16_t adc_bad_channel = 0;
+static uint16_t adc_unbound = 0;
+
+/* Таблица привязки сигналов к каналам (ADR-0020). ADC_CHANNEL_COUNT
+   означает "не привязан": это значение недостижимо для настоящего канала. */
+static uint8_t adc_signal_map[ANALOG_SIGNAL_COUNT] = {
+    ADC_CHANNEL_COUNT, ADC_CHANNEL_COUNT, ADC_CHANNEL_COUNT,
+    ADC_CHANNEL_COUNT, ADC_CHANNEL_COUNT
+};
+
+void hal_adc_bind(analog_signal_t signal, uint8_t channel)
+{
+    if (signal >= ANALOG_SIGNAL_COUNT) {
+        return;
+    }
+    adc_signal_map[signal] = channel;
+}
+
+uint16_t hal_adc_unbound_count(void)
+{
+    return adc_unbound;
+}
+
+uint16_t hal_adc_read_signal(analog_signal_t signal)
+{
+    if (signal >= ANALOG_SIGNAL_COUNT ||
+        adc_signal_map[signal] >= ADC_CHANNEL_COUNT) {
+        if (adc_unbound != 0xFFFF) {
+            adc_unbound++;
+        }
+        return 0;   /* обоснование в hal_adc.h */
+    }
+    return hal_adc_read(adc_signal_map[signal]);
+}
+
+
+uint16_t hal_adc_bad_channel_count(void)
+{
+    return adc_bad_channel;
+}
+
 uint16_t hal_adc_read(uint8_t channel)
 {
     /*
-     * Каналы 0–7 на ATmega328P:
-     *   0–5 → A0–A5 (обычные)
-     *   6–7 → A6–A7 (только аналоговые, нет digital)
+     * Каналы 0–7 на ATmega328P: 0–5 выведены и как цифровые, 6–7 только
+     * аналоговые. ADMUX принимает номер канала, и только его.
      *
-     * Для Arduino pin mapping: A0=14, A1=15, ..., A6=20, A7=21
-     * Но ADMUX принимает номер канала 0–7
+     * Здесь раньше стояло «if (channel >= 14) channel -= 14;» — попытка
+     * принять заодно нумерацию выводов Arduino, где A0 = 14. Функция
+     * угадывала, что ей передали, по величине числа. Следом шло
+     * «channel &= 0x07», превращавшее любое лишнее значение в валидный
+     * канал молча: 9 читалось как канал 1. Обе строки убраны вместе
+     * с переездом карты каналов в настройки (ADR-0009).
      */
-    if (channel >= 14) channel -= 14;  /* Arduino pin → ADC channel */
-    channel &= 0x07;
+    if (channel >= ADC_CHANNEL_COUNT) {
+        if (adc_bad_channel != 0xFFFF) {
+            adc_bad_channel++;
+        }
+        return 0;   /* безопасное значение; обоснование в hal_adc.h */
+    }
 
     /* Выбор канала, сохраняя REFS */
     ADMUX = (ADMUX & 0xF0) | channel;
@@ -334,25 +385,25 @@ void hal_system_irq_restore(uint8_t state)
 }
 
 /* ====================================================================
- *  hal_eeprom
+ *  hal_nvm — долговременная память (ADR-0021)
  * ==================================================================== */
 
-void hal_eeprom_read(uint16_t addr, uint8_t *buf, uint16_t len)
+void hal_nvm_read(uint16_t addr, uint8_t *buf, uint16_t len)
 {
     eeprom_read_block(buf, (const void *)(uintptr_t)addr, len);
 }
 
-void hal_eeprom_write(uint16_t addr, const uint8_t *buf, uint16_t len)
+void hal_nvm_write(uint16_t addr, const uint8_t *buf, uint16_t len)
 {
     eeprom_update_block(buf, (void *)(uintptr_t)addr, len);
 }
 
-uint8_t hal_eeprom_read_byte(uint16_t addr)
+uint8_t hal_nvm_read_byte(uint16_t addr)
 {
     return eeprom_read_byte((const uint8_t *)(uintptr_t)addr);
 }
 
-void hal_eeprom_write_byte(uint16_t addr, uint8_t data)
+void hal_nvm_write_byte(uint16_t addr, uint8_t data)
 {
     eeprom_update_byte((uint8_t *)(uintptr_t)addr, data);
 }
@@ -538,4 +589,32 @@ uint16_t hal_encoder_get_count(encoder_channel_t ch)
     uint16_t v = encoder_count[ch];
     SREG = sreg;
     return v;
+}
+
+/* ====================================================================
+ *  util_rom — чтение постоянной памяти (ADR-0021)
+ *
+ *  У AVR гарвардская архитектура: флеш и RAM адресуются разными
+ *  инструкциями, и обычное разыменование указателя на данные с атрибутом
+ *  progmem прочитало бы RAM по тому же численному адресу. Поэтому нужен
+ *  pgm_read_*, и место ему здесь — это платформенная деталь.
+ *
+ *  Для платформ с единым адресным пространством те же функции реализованы
+ *  в util_rom.cpp разыменованием указателя; там файл закрыт условием
+ *  #ifndef __AVR__, здесь — наоборот, поэтому двух определений не бывает.
+ * ==================================================================== */
+
+uint8_t util_rom_read_u8(const void *addr)
+{
+    return pgm_read_byte(addr);
+}
+
+uint16_t util_rom_read_u16(const void *addr)
+{
+    return pgm_read_word(addr);
+}
+
+void util_rom_read_block(void *dst, const void *src, uint8_t len)
+{
+    memcpy_P(dst, src, len);
 }

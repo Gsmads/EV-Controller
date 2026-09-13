@@ -53,7 +53,7 @@ Services      svc_pedals, svc_ramp, svc_motor, svc_speed
      ↓
 Drivers       drv_* (пока пусто, появятся в MVP-3)
      ↓
-HAL           hal_gpio, hal_adc, hal_pwm, hal_uart, hal_eeprom,
+HAL           hal_gpio, hal_adc, hal_pwm, hal_uart, hal_nvm,
               hal_encoder, hal_system, hal_spi, hal_i2c
      ↓
 Hardware      ATmega328P
@@ -94,7 +94,7 @@ Cross-cutting (доступны с любого слоя): `cfg_board.h`, `cfg_s
 ## 4. Сборка, тесты, проверки
 
 ```bash
-cd tests && make run       # 135 тестов, ~5 секунд, должно быть 0 failed
+cd tests && make run       # 191 тест, ~5 секунд, должно быть 0 failed
 cd tests && make clean     # убрать бинарники перед коммитом
 ```
 

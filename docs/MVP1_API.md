@@ -41,7 +41,7 @@
 | `hal_adc.h` | АЦП 10-бит |
 | `hal_pwm.h` | ШИМ: Timer1 (моторы), Timer0 (EPS) |
 | `hal_system.h` | millis, watchdog, IRQ save/restore |
-| `hal_eeprom.h` | Чтение/запись EEPROM |
+| `hal_nvm.h` | Долговременная память (на ATmega328P — EEPROM) |
 | `hal_uart.h` | UART + RS485 DE/RE |
 | `hal_spi.h` | SPI (MVP-3+) |
 | `hal_i2c.h` | I2C (MVP-3+) |
@@ -158,7 +158,7 @@ app_scheduler_run();
 
 ## Тестирование
 
-### Десктопные тесты (135 тестов)
+### Десктопные тесты (191 тест)
 
 ```bash
 cd tests
