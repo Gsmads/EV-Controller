@@ -6,6 +6,7 @@
  * Полностью платформонезависимый, кроме вызовов HAL.
  */
 #include "cfg_settings.h"
+#include "cfg_params.h"
 #include "hal_nvm.h"
 #include "util_crc.h"
 #include "svc_pedals.h"  /* For pedal_combinator_t enum */
@@ -442,11 +443,35 @@ const drive_profile_t* cfg_settings_get_profile(drive_mode_id_t mode)
 
 uint8_t cfg_settings_set_field(uint16_t offset, const void *data, uint8_t size)
 {
-    if (offset + size > sizeof(settings_t)) return 1;
+    /* Единственная охраняемая дверь для записи настроек (ADR-0005).
+       Раньше здесь стояла только проверка выхода за границы структуры,
+       из-за чего brake_rate_max = 0 отключал тормоз и уходил в EEPROM —
+       дефект S-3 docs/AUDIT.md. Теперь запись проходит через реестр:
+       поле должно существовать, размер совпадать, значение лежать
+       в границах, которые следуют из устройства системы. */
+    if ((uint32_t)offset + size > sizeof(settings_t)) {
+        return PARAM_OUT_OF_BOUNDS;
+    }
+
+    param_desc_t desc;
+    if (!cfg_params_find_by_offset(offset, &desc)) {
+        return PARAM_UNKNOWN;
+    }
+
+    int32_t value;
+    uint8_t status = cfg_params_decode(&desc, data, size, &value);
+    if (status != PARAM_OK) {
+        return status;
+    }
+
+    status = cfg_params_check(&desc, value);
+    if (status != PARAM_OK) {
+        return status;
+    }
 
     uint8_t *ptr = (uint8_t *)&current_settings;
     memcpy(ptr + offset, data, size);
-    return 0;
+    return PARAM_OK;
 }
 
 uint16_t cfg_settings_get_size(void)
